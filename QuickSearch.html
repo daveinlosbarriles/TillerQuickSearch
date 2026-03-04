@@ -713,14 +713,14 @@
     var clientStart = Date.now();
     google.script.run
       .withSuccessHandler(function(result) {
-        var totalMs = Date.now() - clientStart;
-        var serverMs = (result && result.serverMs != null) ? result.serverMs : "?";
-        var timing = " (server: " + serverMs + " ms, round-trip: " + (totalMs / 1000).toFixed(1) + " s)";
-        var detail = (result && result.timingBreakdown) ? formatTimingBreakdown(result.timingBreakdown, totalMs, typeof serverMs === "number" ? serverMs : null) : "";
+        // var totalMs = Date.now() - clientStart;
+        // var serverMs = (result && result.serverMs != null) ? result.serverMs : "?";
+        // var timing = " (server: " + serverMs + " ms, round-trip: " + (totalMs / 1000).toFixed(1) + " s)";
+        // var detail = (result && result.timingBreakdown) ? formatTimingBreakdown(result.timingBreakdown, totalMs, typeof serverMs === "number" ? serverMs : null) : "";
         if (result && result.ok) {
           var el = $("setupStatus");
           if (el) el.style.display = "none";
-          setStatus((result.message || "Criteria updated.") + timing + detail, false);
+          setStatus((result.message || "Criteria updated."), false); // + timing + detail
         } else if (result && result.message && result.message.indexOf("not set up") !== -1) {
           var setupEl = $("setupStatus");
           if (setupEl) setupEl.style.display = "block";
@@ -730,9 +730,9 @@
               if (setupEl) setupEl.style.display = "none";
               var setupTotal = Date.now() - setupStart;
               if (r2 && r2.ok) {
-                var setupTotalMs = Date.now() - setupStart;
-                var setupDetail = (r2.timingBreakdown) ? formatTimingBreakdown(r2.timingBreakdown, setupTotalMs, r2.serverMs) : "";
-                setStatus("Setup complete. Criteria updated. (round-trip: " + (setupTotal / 1000).toFixed(1) + " s)" + setupDetail, false);
+                // var setupTotalMs = Date.now() - setupStart;
+                // var setupDetail = (r2.timingBreakdown) ? formatTimingBreakdown(r2.timingBreakdown, setupTotalMs, r2.serverMs) : "";
+                setStatus("Setup complete. Criteria updated.", false); // was: + round-trip + setupDetail
               } else {
                 setStatus((r2 && r2.message) || "Error.", true);
               }
@@ -745,7 +745,7 @@
         } else {
           var el2 = $("setupStatus");
           if (el2) el2.style.display = "none";
-          setStatus((result && result.message) || "Error." + timing, true);
+          setStatus((result && result.message) || "Error.", true); // + timing
         }
       })
       .withFailureHandler(function(err) {
@@ -811,11 +811,11 @@
     var clientStart = Date.now();
     google.script.run
       .withSuccessHandler(function(result) {
-        var totalMs = Date.now() - clientStart;
-        var serverMs = (result && result.serverMs != null) ? result.serverMs : "?";
-        var timing = " (server: " + serverMs + " ms, round-trip: " + (totalMs / 1000).toFixed(1) + " s)";
-        var detail = (result && result.timingBreakdown) ? formatTimingBreakdown(result.timingBreakdown, totalMs, typeof result.serverMs === "number" ? result.serverMs : null) : "";
-        setStatus("All cleared." + timing + detail, false);
+        // var totalMs = Date.now() - clientStart;
+        // var serverMs = (result && result.serverMs != null) ? result.serverMs : "?";
+        // var timing = " (server: " + serverMs + " ms, round-trip: " + (totalMs / 1000).toFixed(1) + " s)";
+        // var detail = (result && result.timingBreakdown) ? formatTimingBreakdown(result.timingBreakdown, totalMs, typeof result.serverMs === "number" ? result.serverMs : null) : "";
+        setStatus("All cleared.", false); // + timing + detail
       })
       .withFailureHandler(function(err) {
         setStatus("Error: " + (err && (err.message || err.toString()) || "unknown"), true);
