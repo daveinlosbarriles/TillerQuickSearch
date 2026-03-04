@@ -41,7 +41,6 @@ var RANGE_INDEX_FIRST = 0;
 var RANGE_INDEX_SECOND = 1;
 
 // --- Quick Search helper column headers ---
-var QUICK_SEARCH_FILTER_VIEW_TITLE = "QuickSearch";
 var QUICK_SEARCH_MATCH_HEADER = "QuickSearch";
 var QUICK_SEARCH_CRITERIA_HEADER = "QuickCriteria";
 // Criteria: single string in row 1 only. Format: D:dateFrom,dateTo|X:description|C:cat1,cat2|A:min,max|Q:acc1,acc2
@@ -264,7 +263,7 @@ function buildQuickSearchFormula(tillerCols, criteriaColLetter, dateCol, descCol
 }
 
 /**
- * One-time setup: ensures helper columns exist, sets the array formula if missing, creates the filter view if missing.
+ * One-time setup: ensures helper columns exist, sets the array formula if missing, applies the basic filter.
  * After this, only writing criteria cells is needed to update results.
  */
 function ensureQuickSearchSetup() {
@@ -299,59 +298,7 @@ function ensureQuickSearchSetup() {
   var formula = buildQuickSearchFormula(tillerCols, criteriaColLetter, dateCol, descCol, amountCol, accountCol, catCol);
   matchCell.setFormula(formula);
 
-  var spreadsheetId = ss.getId();
-  var sheetId = sheet.getSheetId();
   var lastRow = Math.max(sheet.getLastRow(), ROW_DATA_FIRST);
-  var matchColIndex0 = cols.matchColIndex - 1;
-  var filterSpecs = [{ columnIndex: matchColIndex0, filterCriteria: { hiddenValues: ["FALSE", ""] } }];
-  var gridRange = {
-    sheetId: sheetId,
-    startRowIndex: 0,
-    endRowIndex: lastRow,
-    startColumnIndex: 0,
-    endColumnIndex: cols.criteriaColIndex
-  };
-
-  // Remove existing QuickSearch filter view if present (by ID from API, or after add fails with "already exists")
-  function deleteExistingQuickSearchFilterView() {
-    var both = getQuickSearchFilterViewAndRowCount(spreadsheetId, sheetId);
-    var existingId = both && both.filterViewId != null ? both.filterViewId : null;
-    if (existingId != null) {
-      try {
-        Sheets.Spreadsheets.batchUpdate({
-          requests: [{ deleteFilterView: { filterId: existingId } }]
-        }, spreadsheetId);
-      } catch (e) { /* ignore */ }
-      setQuickSearchFilterViewIdCached(null);
-    }
-  }
-
-  deleteExistingQuickSearchFilterView();
-
-  var resp, newFvid;
-  try {
-    resp = Sheets.Spreadsheets.batchUpdate({
-      requests: [{ addFilterView: { filter: { title: QUICK_SEARCH_FILTER_VIEW_TITLE, range: gridRange, filterSpecs: filterSpecs } } }]
-    }, spreadsheetId);
-    newFvid = resp.replies && resp.replies[0] && resp.replies[0].addFilterView && resp.replies[0].addFilterView.filter && resp.replies[0].addFilterView.filter.filterViewId;
-    if (newFvid != null) setQuickSearchFilterViewIdCached(newFvid);
-  } catch (e) {
-    var msg = (e && e.message) || "";
-    if (msg.indexOf("already exists") !== -1 || msg.indexOf("view name") !== -1) {
-      deleteExistingQuickSearchFilterView();
-      try {
-        resp = Sheets.Spreadsheets.batchUpdate({
-          requests: [{ addFilterView: { filter: { title: QUICK_SEARCH_FILTER_VIEW_TITLE, range: gridRange, filterSpecs: filterSpecs } } }]
-        }, spreadsheetId);
-        newFvid = resp.replies && resp.replies[0] && resp.replies[0].addFilterView && resp.replies[0].addFilterView.filter && resp.replies[0].addFilterView.filter.filterViewId;
-        if (newFvid != null) setQuickSearchFilterViewIdCached(newFvid);
-      } catch (e2) {
-        return { ok: false, message: (e2 && e2.message) || "Failed to create filter view after retry." };
-      }
-    } else {
-      return { ok: false, message: msg || "Failed to create filter view." };
-    }
-  }
   applyQuickSearchBasicFilter(sheet, cols.criteriaColIndex, lastRow);
   // Cache criteria column index so write/clear don't use getLastColumn() (which can point to Match when criteria is empty).
   try {
@@ -462,7 +409,7 @@ function getQuickSearchSheetIdCached() {
 
 /**
  * Reads all Quick Search cached values from Document Properties in one call (fewer round-trips).
- * Returns { criteriaColIndex: number|null, sheetIdCached: number|null, filterViewIdCached: number|null }.
+ * Returns { criteriaColIndex: number|null, sheetIdCached: number|null }.
  */
 function getQuickSearchCachedProps() {
   try {
@@ -473,12 +420,9 @@ function getQuickSearchCachedProps() {
     var sid = all.quickSearchSheetId;
     var sheetIdCached = (sid != null && sid !== "") ? parseInt(String(sid), 10) : null;
     if (sheetIdCached != null && isNaN(sheetIdCached)) sheetIdCached = null;
-    var fvid = all.quickSearchFilterViewId;
-    var filterViewIdCached = (fvid != null && fvid !== "") ? parseInt(String(fvid), 10) : null;
-    if (filterViewIdCached != null && isNaN(filterViewIdCached)) filterViewIdCached = null;
-    return { criteriaColIndex: criteriaColIndex, sheetIdCached: sheetIdCached, filterViewIdCached: filterViewIdCached };
+    return { criteriaColIndex: criteriaColIndex, sheetIdCached: sheetIdCached };
   } catch (e) {
-    return { criteriaColIndex: null, sheetIdCached: null, filterViewIdCached: null };
+    return { criteriaColIndex: null, sheetIdCached: null };
   }
 }
 
@@ -499,26 +443,6 @@ function getQuickSearchSheet(ss, cachedSheetId) {
   var sheet = sheetId != null ? ss.getSheetById(sheetId) : ss.getSheetByName(QUICK_SEARCH_SHEET_NAME);
   if (sheet) setQuickSearchSheetIdCached(sheet.getSheetId());
   return sheet || null;
-}
-
-/** Returns cached filter view ID for Quick Search, or null if not set. Saves ~400ms vs Sheets API get. */
-function getQuickSearchFilterViewIdCached() {
-  try {
-    var s = PropertiesService.getDocumentProperties().getProperty("quickSearchFilterViewId");
-    if (s == null || s === "") return null;
-    var n = parseInt(s, 10);
-    return isNaN(n) ? null : n;
-  } catch (e) {
-    return null;
-  }
-}
-
-function setQuickSearchFilterViewIdCached(id) {
-  try {
-    var props = PropertiesService.getDocumentProperties();
-    if (id == null || id === "") props.deleteProperty("quickSearchFilterViewId");
-    else props.setProperty("quickSearchFilterViewId", String(id));
-  } catch (e) { /* ignore */ }
 }
 
 /**
@@ -562,15 +486,14 @@ function applyQuickSearchBasicFilter(sheet, criteriaColIndex, lastRow) {
 }
 
 /**
- * Refreshes the filter: (1) updateFilterView with current range/specs to force UI refresh, (2) setBasicFilter, (3) SpreadsheetApp setColumnFilterCriteria.
+ * Refreshes the filter: setBasicFilter (API) then SpreadsheetApp setColumnFilterCriteria.
  * @param {Sheet} sheet - Transactions sheet.
  * @param {number} criteriaColIndex - Criteria column index (1-based).
  * @param {string} spreadsheetId - Spreadsheet ID.
  * @param {number} sheetId - Sheet ID.
- * @param {number|null} filterViewIdCached - Cached filter view ID from setup.
- * @returns {{ ok: boolean, sheetId?: number, filterViewId?: number|null, applyUrl?: string|null, timing: object }}
+ * @returns {{ ok: boolean, sheetId?: number, timing: object }}
  */
-function refreshQuickSearchFilterView(sheet, criteriaColIndex, spreadsheetId, sheetId, filterViewIdCached) {
+function refreshQuickSearchFilterView(sheet, criteriaColIndex, spreadsheetId, sheetId) {
   var timing = { getLastRowMs: 0, getFilterViewIdMs: 0, batchUpdateMs: 0, applyBasicFilterMs: 0, getFilterMs: 0, createFilterMs: 0, setColumnFilterCriteriaMs: 0 };
   if (!sheet || criteriaColIndex == null || criteriaColIndex < 2) return { ok: false, timing: timing };
 
@@ -581,21 +504,6 @@ function refreshQuickSearchFilterView(sheet, criteriaColIndex, spreadsheetId, sh
   var matchColIndex0 = criteriaColIndex - 2;
   var filterSpecs = [{ columnIndex: matchColIndex0, filterCriteria: { hiddenValues: ["FALSE", ""] } }];
   var gridRange = { sheetId: sheetId, startRowIndex: 0, endRowIndex: lastRow, startColumnIndex: 0, endColumnIndex: criteriaColIndex };
-
-  var filterViewId = filterViewIdCached != null ? filterViewIdCached : null;
-  if (filterViewId == null) {
-    var both = getQuickSearchFilterViewAndRowCount(spreadsheetId, sheetId);
-    if (both && both.filterViewId != null) filterViewId = both.filterViewId;
-  }
-  if (filterViewId != null) {
-    var t2 = Date.now();
-    try {
-      Sheets.Spreadsheets.batchUpdate({
-        requests: [{ updateFilterView: { filterViewId: filterViewId, filter: { title: QUICK_SEARCH_FILTER_VIEW_TITLE, range: gridRange, filterSpecs: filterSpecs } } }]
-      }, spreadsheetId);
-    } catch (e) { /* ignore */ }
-    timing.batchUpdateMs = Date.now() - t2;
-  }
 
   var t1 = Date.now();
   try {
@@ -629,20 +537,13 @@ function refreshQuickSearchFilterView(sheet, criteriaColIndex, spreadsheetId, sh
     createFilterMs: timing.createFilterMs,
     setColumnFilterCriteriaMs: timing.setColumnFilterCriteriaMs
   };
-  return {
-    ok: true,
-    sheetId: sheetId,
-    filterViewId: filterViewId,
-    applyUrl: filterViewId ? "https://docs.google.com/spreadsheets/d/" + spreadsheetId + "/edit#gid=" + sheetId + "&fvid=" + filterViewId : null,
-    sheetUrl: "https://docs.google.com/spreadsheets/d/" + spreadsheetId + "/edit#gid=" + sheetId,
-    timing: timing
-  };
+  return { ok: true, sheetId: sheetId, timing: timing };
 }
 
 /**
  * Writes the single criteria string to the criteria cell (row 1). Uses cached criteria column index from setup
  * (getLastColumn() would point to Match column when criteria cell is empty, overwriting the formula).
- * If refreshView is true, refreshes the QuickSearch filter view so the sheet UI updates immediately.
+ * If refreshView is true, refreshes the basic filter so the sheet UI updates immediately.
  * Returns timingBreakdown: { getSheetMs, getColMs, buildCriteriaMs, setValueMs, refreshTiming } for performance logging.
  */
 function writeQuickSearchCriteria(criteriaJson, refreshView) {
@@ -674,18 +575,15 @@ function writeQuickSearchCriteria(criteriaJson, refreshView) {
   var out = { ok: true, message: "Criteria updated.", serverMs: Date.now() - t0, timingBreakdown: timing };
   if (refreshView) {
     SpreadsheetApp.flush();
-    var ref = refreshQuickSearchFilterView(sheet, criteriaColIndex, ss.getId(), sheet.getSheetId(), cached.filterViewIdCached);
+    var ref = refreshQuickSearchFilterView(sheet, criteriaColIndex, ss.getId(), sheet.getSheetId());
     if (ref && ref.timing) out.timingBreakdown.refresh = ref.timing;
     if (ref && ref.sheetId != null) out.sheetId = ref.sheetId;
-    if (ref && ref.filterViewId != null) out.filterViewId = ref.filterViewId;
-    if (ref && ref.applyUrl) out.applyUrl = ref.applyUrl;
-    if (ref && ref.sheetUrl) out.sheetUrl = ref.sheetUrl;
   }
   return out;
 }
 
 /**
- * Applies Quick Search: ensures setup once (formula + filter view), then writes criteria and refreshes the filter view.
+ * Applies Quick Search: ensures setup once (formula + basic filter), then writes criteria and refreshes the filter.
  */
 function applyQuickSearch(criteriaJson) {
   var setup = ensureQuickSearchSetup();
@@ -724,7 +622,7 @@ function testQuickSearchCellTiming() {
 }
 
 /**
- * Clears Quick Search: clears the criteria cell so all rows match, then refreshes the filter view (same as Search button).
+ * Clears Quick Search: clears the criteria cell so all rows match, then refreshes the filter (same as Search button).
  * Returns timingBreakdown for performance logging.
  */
 function clearQuickSearch() {
@@ -744,76 +642,26 @@ function clearQuickSearch() {
     sheet.getRange(ROW_HEADER, criteriaColIndex).setValue("");
     timing.setValueMs = Date.now() - t3;
     SpreadsheetApp.flush();
-    var ref = refreshQuickSearchFilterView(sheet, criteriaColIndex, ss.getId(), sheet.getSheetId(), cached.filterViewIdCached);
+    var ref = refreshQuickSearchFilterView(sheet, criteriaColIndex, ss.getId(), sheet.getSheetId());
     if (ref && ref.timing) timing.refresh = ref.timing;
   }
   return { ok: true, serverMs: Date.now() - t0, timingBreakdown: timing };
 }
 
 /**
- * Returns the filter view ID for the Quick Search filter view on the given sheet, or null.
- */
-function getQuickSearchFilterViewId(spreadsheetId, sheetId) {
-  var both = getQuickSearchFilterViewAndRowCount(spreadsheetId, sheetId);
-  return both ? both.filterViewId : null;
-}
-
-/**
  * Returns grid row count for the given sheet via Sheets API (fast metadata read, no sheet scan).
- * Use for filter view range; often faster than sheet.getLastRow() on large sheets.
+ * Use for filter range; often faster than sheet.getLastRow() on large sheets.
  */
 function getQuickSearchSheetGridRowCount(spreadsheetId, sheetId) {
-  Logger.log("[getQuickSearchSheetGridRowCount] sheetId=" + sheetId + " typeof=" + typeof sheetId);
   try {
     var spread = Sheets.Spreadsheets.get(spreadsheetId, { fields: "sheets(properties(sheetId,gridProperties(rowCount)))" });
     var sheets = spread.sheets || [];
-    Logger.log("[getQuickSearchSheetGridRowCount] sheets.length=" + sheets.length);
     for (var i = 0; i < sheets.length; i++) {
-      var sid = sheets[i].properties && sheets[i].properties.sheetId;
-      var rc = sheets[i].properties && sheets[i].properties.gridProperties ? sheets[i].properties.gridProperties.rowCount : undefined;
-      Logger.log("[getQuickSearchSheetGridRowCount] sheet[" + i + "] sheetId=" + sid + " typeof=" + typeof sid + " rowCount=" + rc + " match=" + (Number(sid) === Number(sheetId)));
       if (sheets[i].properties && Number(sheets[i].properties.sheetId) === Number(sheetId)) {
-        var rowCount = Math.max(rc || ROW_DATA_FIRST, ROW_DATA_FIRST);
-        Logger.log("[getQuickSearchSheetGridRowCount] matched, returning " + rowCount);
-        return rowCount;
+        var rc = sheets[i].properties.gridProperties ? sheets[i].properties.gridProperties.rowCount : undefined;
+        return Math.max(rc || ROW_DATA_FIRST, ROW_DATA_FIRST);
       }
     }
-    Logger.log("[getQuickSearchSheetGridRowCount] no matching sheet found, returning default 2");
-  } catch (e) {
-    Logger.log("[getQuickSearchSheetGridRowCount] catch: " + (e && e.message));
-  }
+  } catch (e) { /* ignore */ }
   return 2;
-}
-
-/**
- * One API call: returns { filterViewId, rowCount } for the Quick Search sheet.
- * Use when filter view ID is not cached so we get both in a single get.
- */
-function getQuickSearchFilterViewAndRowCount(spreadsheetId, sheetId) {
-  Logger.log("[getQuickSearchFilterViewAndRowCount] sheetId=" + sheetId + " typeof=" + typeof sheetId);
-  try {
-    var spread = Sheets.Spreadsheets.get(spreadsheetId, { fields: "sheets(properties(sheetId,title,gridProperties(rowCount)),filterViews(filterViewId,title))" });
-    var sheets = spread.sheets || [];
-    Logger.log("[getQuickSearchFilterViewAndRowCount] sheets.length=" + sheets.length);
-    for (var s = 0; s < sheets.length; s++) {
-      var sid = sheets[s].properties && sheets[s].properties.sheetId;
-      var rc = sheets[s].properties && sheets[s].properties.gridProperties ? sheets[s].properties.gridProperties.rowCount : undefined;
-      Logger.log("[getQuickSearchFilterViewAndRowCount] sheet[" + s + "] sheetId=" + sid + " typeof=" + typeof sid + " rowCount=" + rc + " match=" + (Number(sid) === Number(sheetId)));
-      if (sheets[s].properties && Number(sheets[s].properties.sheetId) === Number(sheetId)) {
-        var rowCount = ROW_DATA_FIRST;
-        if (sheets[s].properties.gridProperties && sheets[s].properties.gridProperties.rowCount != null) rowCount = Math.max(sheets[s].properties.gridProperties.rowCount, ROW_DATA_FIRST);
-        var filterViewId = null;
-        var views = sheets[s].filterViews || [];
-        for (var v = 0; v < views.length; v++) {
-          if ((views[v].title || "").trim() === QUICK_SEARCH_FILTER_VIEW_TITLE) { filterViewId = views[v].filterViewId; break; }
-        }
-        Logger.log("[getQuickSearchFilterViewAndRowCount] matched, rowCount=" + rowCount + " filterViewId=" + filterViewId);
-        return { filterViewId: filterViewId, rowCount: rowCount };
-      }
-    }
-    Logger.log("[getQuickSearchFilterViewAndRowCount] no matching sheet found, returning default");
-  } catch (e) {
-    Logger.log("[getQuickSearchFilterViewAndRowCount] catch: " + (e && e.message));
-  }
-  return { filterViewId: null, rowCount: ROW_DATA_FIRST };
 }

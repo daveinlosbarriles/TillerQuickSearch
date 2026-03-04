@@ -721,9 +721,6 @@
           var el = $("setupStatus");
           if (el) el.style.display = "none";
           setStatus((result.message || "Criteria updated.") + timing + detail, false);
-          if (result.applyUrl) {
-            try { window.top.location.href = result.applyUrl; } catch (e) { }
-          }
         } else if (result && result.message && result.message.indexOf("not set up") !== -1) {
           var setupEl = $("setupStatus");
           if (setupEl) setupEl.style.display = "block";
@@ -736,9 +733,6 @@
                 var setupTotalMs = Date.now() - setupStart;
                 var setupDetail = (r2.timingBreakdown) ? formatTimingBreakdown(r2.timingBreakdown, setupTotalMs, r2.serverMs) : "";
                 setStatus("Setup complete. Criteria updated. (round-trip: " + (setupTotal / 1000).toFixed(1) + " s)" + setupDetail, false);
-                if (r2.applyUrl) {
-                  try { window.top.location.href = r2.applyUrl; } catch (e) { }
-                }
               } else {
                 setStatus((r2 && r2.message) || "Error.", true);
               }
