@@ -204,6 +204,7 @@ function ensureQuickSearchHelperColumns() {
   }
 
   // No existing helper columns: append two columns
+  var matchColIndex, criteriaColIndex;
   if (lastCol === 0) {
     sheet.getRange(ROW_HEADER, HELPER_COL_MATCH_DEFAULT, ROW_HEADER, HELPER_COL_CRITERIA_DEFAULT).setValues([["", ""]]);
     sheet.getRange(ROW_HEADER, HELPER_COL_MATCH_DEFAULT).setValue(QUICK_SEARCH_MATCH_HEADER);
@@ -211,6 +212,8 @@ function ensureQuickSearchHelperColumns() {
     matchColIndex = HELPER_COL_MATCH_DEFAULT;
     criteriaColIndex = HELPER_COL_CRITERIA_DEFAULT;
   } else {
+    sheet.insertColumnAfter(lastCol);
+    sheet.insertColumnAfter(lastCol + 1);
     matchColIndex = lastCol + 1;
     criteriaColIndex = lastCol + 2;
     sheet.getRange(ROW_HEADER, matchColIndex).setValue(QUICK_SEARCH_MATCH_HEADER);
@@ -253,9 +256,12 @@ function buildQuickSearchFormula(tillerCols, criteriaColLetter, dateCol, descCol
     + "c_esc,REGEXREPLACE(c_no_blank,\"" + reEsc + "\",\"" + reRep + "\"),"
     + "c_match,IF(c_has_blank,\"(?i)^(\"&\"|\"&SUBSTITUTE(c_esc,\",\",\"|\")&\")$\",\"(?i)^(\"&SUBSTITUTE(c_esc,\",\",\"|\")&\")$\"),"
     + "q_match,\"(?i)^(\"&SUBSTITUTE(q_raw,\",\",\"|\")&\")$\","
-    + "x_match,\"(?i)\"&TRIM(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(x_raw,\" {{PIPE}} \",\"|\"),\" {{PIPE}}\",\"|\"),\"{{PIPE}} \",\"|\"),\"{{PIPE}}\",\"|\")),"
+    + "x_include_raw,TRIM(IFERROR(INDEX(SPLIT(x_raw,\"{{NOT}}\"),1,1),x_raw)),"
+    + "x_exclude_raw,IFERROR(TRIM(INDEX(SPLIT(x_raw,\"{{NOT}}\"),1,2)),\"\"),"
+    + "x_match_include,\"(?i)\"&TRIM(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(x_include_raw,\" {{PIPE}} \",\"|\"),\" {{PIPE}}\",\"|\"),\"{{PIPE}} \",\"|\"),\"{{PIPE}}\",\"|\")),"
+    + "x_match_exclude,\"(?i)\"&TRIM(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(x_exclude_raw,\" {{PIPE}} \",\"|\"),\" {{PIPE}}\",\"|\"),\"{{PIPE}} \",\"|\"),\"{{PIPE}}\",\"|\")),"
     + "d_check,IF(LEN(d_raw)<3,1,(N(" + dateLetter + ":" + dateLetter + ")>=d_start)*(N(" + dateLetter + ":" + dateLetter + ")<=d_end)),"
-    + "x_check,IF(x_raw=\"\",1,REGEXMATCH(TO_TEXT(" + descLetter + ":" + descLetter + "),x_match)),"
+    + "x_check,IF(x_raw=\"\",1,IF(x_exclude_raw=\"\",REGEXMATCH(TO_TEXT(" + descLetter + ":" + descLetter + "),x_match_include),(REGEXMATCH(TO_TEXT(" + descLetter + ":" + descLetter + "),x_match_include))*(1-(REGEXMATCH(TO_TEXT(" + descLetter + ":" + descLetter + "),x_match_exclude))))),"
     + "c_check,IF(c_raw=\"\",1,REGEXMATCH(TO_TEXT(" + categoryLetter + ":" + categoryLetter + "),c_match)),"
     + "a_check,IF(LEN(a_raw)<2,1,(N(" + amountLetter + ":" + amountLetter + ")>=a_min)*(N(" + amountLetter + ":" + amountLetter + ")<=a_max)),"
     + "q_check,IF(q_raw=\"\",1,REGEXMATCH(TO_TEXT(" + accountLetter + ":" + accountLetter + "),q_match)),"
@@ -319,6 +325,25 @@ function quickSearchFormatDateForCriteria(dateStr) {
 }
 
 /**
+ * Google Sheets REGEXMATCH uses RE2, which does not support lookahead/lookbehind.
+ * Returns an error message if desc contains unsupported constructs, or null if ok.
+ * If desc contains " but not ", validates both include and exclude parts.
+ */
+function quickSearchDescriptionRegexUnsupported(desc) {
+  if (!desc || typeof desc !== "string") return null;
+  var s = desc.trim();
+  if (!s.length) return null;
+  var parts = s.indexOf(" but not ") !== -1 ? s.split(" but not ") : [s];
+  for (var i = 0; i < parts.length; i++) {
+    var p = (parts[i] || "").trim();
+    if (!p.length) continue;
+    if (/\(\?[=!]/.test(p)) return "Lookahead ((?=...) or (?!...)) is not supported in Google Sheets. Use a simpler pattern (e.g. Alaska to match rows containing Alaska).";
+    if (/\(\?[<>]/.test(p)) return "Lookbehind ((?<=...) or (?<!...)) is not supported in Google Sheets. Use a simpler pattern.";
+  }
+  return null;
+}
+
+/**
  * Builds the single criteria string for W1. Format: D:dateFrom,dateTo|X:description|C:cat1,cat2|A:min,max|Q:acc1,acc2
  * Dates are sent as MM/dd/yyyy so DATEVALUE in the formula matches the sheet's date format.
  */
@@ -334,8 +359,17 @@ function buildQuickSearchCriteriaString(criteria) {
   } else {
     parts.push("D:");
   }
-  // Description supports regex; encode | as {{PIPE}} so criteria delimiter is not broken
-  var descVal = (criteria.description == null ? "" : String(criteria.description).trim()).replace(/\|/g, "{{PIPE}}");
+  // Description supports regex. " but not " splits into include/exclude (stored as include{{NOT}}exclude). Encode | as {{PIPE}}.
+  var descInput = (criteria.description == null ? "" : String(criteria.description).trim());
+  var descVal;
+  if (descInput.indexOf(" but not ") !== -1) {
+    var descParts = descInput.split(" but not ");
+    var includePart = (descParts[0] || "").trim().replace(/\|/g, "{{PIPE}}");
+    var excludePart = (descParts[1] || "").trim().replace(/\|/g, "{{PIPE}}");
+    descVal = includePart + "{{NOT}}" + excludePart;
+  } else {
+    descVal = descInput.replace(/\|/g, "{{PIPE}}");
+  }
   parts.push("X:" + descVal);
   var categoryList = Array.isArray(criteria.categories) ? criteria.categories : [];
   var categoryVal = categoryList.map(function(c) {
@@ -463,6 +497,13 @@ function applyQuickSearchBasicFilter(sheet, criteriaColIndex, lastRow) {
   var filter = sheet.getFilter();
   timing.getFilterMs = Date.now() - t1;
 
+  if (filter) {
+    var existingRange = filter.getRange();
+    if (existingRange.getLastColumn() < criteriaColIndex) {
+      try { filter.remove(); } catch (e) { /* ignore */ }
+      filter = null;
+    }
+  }
   if (!filter) {
     var t1b = Date.now();
     try { filter = filterRange.createFilter(); } catch (e) { return { ok: false, timing: timing }; }
@@ -486,7 +527,8 @@ function applyQuickSearchBasicFilter(sheet, criteriaColIndex, lastRow) {
 }
 
 /**
- * Refreshes the filter: setBasicFilter (API) then SpreadsheetApp setColumnFilterCriteria.
+ * Refreshes the filter. When the filter already exists (common case), only getFilter + setColumnFilterCriteria
+ * (~550 ms). When no filter exists, creates it using API row count and createFilter().
  * @param {Sheet} sheet - Transactions sheet.
  * @param {number} criteriaColIndex - Criteria column index (1-based).
  * @param {string} spreadsheetId - Spreadsheet ID.
@@ -497,42 +539,43 @@ function refreshQuickSearchFilterView(sheet, criteriaColIndex, spreadsheetId, sh
   var timing = { getLastRowMs: 0, getFilterViewIdMs: 0, batchUpdateMs: 0, applyBasicFilterMs: 0, getFilterMs: 0, createFilterMs: 0, setColumnFilterCriteriaMs: 0 };
   if (!sheet || criteriaColIndex == null || criteriaColIndex < 2) return { ok: false, timing: timing };
 
+  var matchCol1Based = criteriaColIndex - 1;
+  var criteria = SpreadsheetApp.newFilterCriteria().setHiddenValues(["FALSE", ""]).build();
+
   var t0 = Date.now();
+  var filter = sheet.getFilter();
+  timing.getFilterMs = Date.now() - t0;
+
+  if (filter) {
+    var t1 = Date.now();
+    try { filter.setColumnFilterCriteria(matchCol1Based, criteria); } catch (e) { /* ignore */ }
+    timing.setColumnFilterCriteriaMs = Date.now() - t1;
+    timing.applyBasicFilterBreakdown = {
+      setBasicFilterApiMs: 0,
+      getFilterMs: timing.getFilterMs,
+      createFilterMs: 0,
+      setColumnFilterCriteriaMs: timing.setColumnFilterCriteriaMs
+    };
+    return { ok: true, sheetId: sheetId, timing: timing };
+  }
+
+  var t2 = Date.now();
   var lastRow = getQuickSearchSheetGridRowCount(spreadsheetId, sheetId);
-  timing.getLastRowMs = Date.now() - t0;
-
-  var matchColIndex0 = criteriaColIndex - 2;
-  var filterSpecs = [{ columnIndex: matchColIndex0, filterCriteria: { hiddenValues: ["FALSE", ""] } }];
-  var gridRange = { sheetId: sheetId, startRowIndex: 0, endRowIndex: lastRow, startColumnIndex: 0, endColumnIndex: criteriaColIndex };
-
-  var t1 = Date.now();
-  try {
-    Sheets.Spreadsheets.batchUpdate({
-      requests: [{ setBasicFilter: { filter: { range: gridRange, filterSpecs: filterSpecs } } }]
-    }, spreadsheetId);
-  } catch (e) { /* ignore */ }
-  timing.applyBasicFilterMs = Date.now() - t1;
+  timing.getLastRowMs = Date.now() - t2;
 
   var filterRange = sheet.getRange(ROW_HEADER, COL_FIRST, lastRow, criteriaColIndex);
   var t3 = Date.now();
-  var filter = sheet.getFilter();
-  timing.getFilterMs = Date.now() - t3;
-  if (!filter) {
-    var t3b = Date.now();
-    try { filter = filterRange.createFilter(); } catch (e) { /* continue */ }
-    timing.createFilterMs = Date.now() - t3b;
-    filter = sheet.getFilter();
-  }
+  try { filter = filterRange.createFilter(); } catch (e) { /* ignore */ }
+  timing.createFilterMs = Date.now() - t3;
+  filter = sheet.getFilter();
   if (filter) {
-    var matchCol1Based = criteriaColIndex - 1;
-    var criteria = SpreadsheetApp.newFilterCriteria().setHiddenValues(["FALSE", ""]).build();
     var t4 = Date.now();
     try { filter.setColumnFilterCriteria(matchCol1Based, criteria); } catch (e) { /* ignore */ }
     timing.setColumnFilterCriteriaMs = Date.now() - t4;
   }
-
+  timing.applyBasicFilterMs = timing.getFilterMs + timing.createFilterMs + timing.setColumnFilterCriteriaMs;
   timing.applyBasicFilterBreakdown = {
-    setBasicFilterApiMs: timing.applyBasicFilterMs,
+    setBasicFilterApiMs: 0,
     getFilterMs: timing.getFilterMs,
     createFilterMs: timing.createFilterMs,
     setColumnFilterCriteriaMs: timing.setColumnFilterCriteriaMs
@@ -563,6 +606,13 @@ function writeQuickSearchCriteria(criteriaJson, refreshView) {
   if (criteriaColIndex == null || criteriaColIndex < 1) {
     return { ok: false, message: "Quick Search not set up. Run setup first.", serverMs: Date.now() - t0, timingBreakdown: timing };
   }
+  // When criteria cell is empty, getLastColumn() can be Match column (one less); only treat as not set up if criteria column is beyond that.
+  if (criteriaColIndex > sheet.getLastColumn() + 1) {
+    return { ok: false, message: "Quick Search not set up. Run setup first.", serverMs: Date.now() - t0, timingBreakdown: timing };
+  }
+
+  var descError = quickSearchDescriptionRegexUnsupported(criteria.description);
+  if (descError) return { ok: false, message: descError, serverMs: Date.now() - t0, timingBreakdown: timing };
 
   var t3 = Date.now();
   var criteriaString = buildQuickSearchCriteriaString(criteria);
@@ -638,12 +688,16 @@ function clearQuickSearch() {
 
   var criteriaColIndex = cached.criteriaColIndex;
   if (criteriaColIndex != null && criteriaColIndex >= 1) {
-    var t3 = Date.now();
-    sheet.getRange(ROW_HEADER, criteriaColIndex).setValue("");
-    timing.setValueMs = Date.now() - t3;
-    SpreadsheetApp.flush();
-    var ref = refreshQuickSearchFilterView(sheet, criteriaColIndex, ss.getId(), sheet.getSheetId());
-    if (ref && ref.timing) timing.refresh = ref.timing;
+    if (criteriaColIndex <= sheet.getLastColumn() + 1) {
+      var t3 = Date.now();
+      sheet.getRange(ROW_HEADER, criteriaColIndex).setValue("");
+      timing.setValueMs = Date.now() - t3;
+      SpreadsheetApp.flush();
+      var ref = refreshQuickSearchFilterView(sheet, criteriaColIndex, ss.getId(), sheet.getSheetId());
+      if (ref && ref.timing) timing.refresh = ref.timing;
+    } else {
+      try { PropertiesService.getDocumentProperties().deleteProperty("quickSearchCriteriaCol"); } catch (e) { /* ignore */ }
+    }
   }
   return { ok: true, serverMs: Date.now() - t0, timingBreakdown: timing };
 }

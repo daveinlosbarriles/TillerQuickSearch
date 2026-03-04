@@ -21,8 +21,16 @@
   }
   .quick-search-actions {
     display: flex;
+    align-items: center;
     gap: 8px;
-    margin-bottom: 6px;
+    margin-bottom: 4px;
+    flex-wrap: wrap;
+  }
+  .quick-search-actions .filter-status {
+    margin-left: 4px;
+    margin-bottom: 0;
+    flex: 1;
+    min-width: 80px;
   }
   .search-btn, .reset-all-btn {
     padding: 4px 10px;
@@ -43,14 +51,14 @@
     border-color: #1976d2;
   }
   .section {
-    margin-bottom: 6px;
-    padding-top: 4px;
+    margin-bottom: 4px;
+    padding-top: 2px;
   }
   .section-title-row {
     display: flex;
     align-items: center;
     gap: 8px;
-    margin-bottom: 6px;
+    margin-bottom: 4px;
   }
   .section-title-row select {
     width: auto;
@@ -88,7 +96,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    margin-bottom: 4px;
+    margin-bottom: 2px;
     flex-wrap: wrap;
   }
   .date-range-row label {
@@ -169,6 +177,11 @@
     background: #fff;
     padding: 1px 3px;
     border-radius: 2px;
+  }
+  .desc-regex-note {
+    margin: 6px 0 0 0;
+    font-size: 11px;
+    color: #555;
   }
   .account-inline-row {
     display: flex;
@@ -293,7 +306,7 @@
   .filter-status {
     font-size: 12px;
     color: #1976d2;
-    margin-bottom: 6px;
+    margin-bottom: 0;
     white-space: pre-wrap;
     word-break: break-word;
   }
@@ -326,9 +339,8 @@
 <div class="quick-search-actions">
   <button type="button" class="search-btn" id="searchBtn">Search</button>
   <button type="button" class="reset-all-btn" id="resetAllBtn">Reset All</button>
+  <div id="filterStatus" class="filter-status" style="display:none;"></div>
 </div>
-
-<div id="filterStatus" class="filter-status" style="display:none;"></div>
 
 <div id="quickSearchPanel">
   <div class="section">
@@ -378,11 +390,12 @@
           <tr><td><code>Amazon | Walmart</code></td><td>Shows rows containing Amazon or Walmart.</td></tr>
           <tr><td><code>^Vanguard</code></td><td>Shows rows where the name starts with Vanguard.</td></tr>
           <tr><td><code>1234$</code></td><td>Shows rows where the name ends with 1234.</td></tr>
-          <tr><td><code>(?=.*Amazon)(?=.*Refund)</code></td><td>Shows rows containing both Amazon and Refund (in any order).</td></tr>
-          <tr><td><code>^(?!.*Adjustment).*Amazon</code></td><td>Shows Amazon transactions unless they contain "Adjustment".</td></tr>
           <tr><td><code>^Gas$</code></td><td>Shows rows that are exactly "Gas" (no "Gasoline").</td></tr>
+          <tr><td><code>Amazon.*Return|Return.*Amazon</code></td><td>Contains both Amazon and Return (in any order).</td></tr>
+          <tr><td><code>gas but not chevron</code></td><td>Shows rows containing "gas" but not "chevron".</td></tr>
         </tbody>
       </table>
+      <p class="desc-regex-note">Use <strong> but not </strong> (spaces included) to require a phrase and exclude another. Google Sheets does not support lookahead <code>(?=)</code> <code>(?!)</code> or lookbehind.</p>
     </div>
   </div>
 
@@ -599,15 +612,15 @@
     if (tb.setValueMs != null) lines.push("  setValue: " + tb.setValueMs + " ms");
     if (tb.refresh) {
       var r = tb.refresh;
-      lines.push("  refresh: getLastRow " + (r.getLastRowMs || 0) + " ms, getFilterViewId " + (r.getFilterViewIdMs || 0) + " ms, batchUpdate " + (r.batchUpdateMs || 0) + " ms, applyBasicFilter " + (r.applyBasicFilterMs || 0) + " ms");
+      var parts = [];
+      if ((r.getLastRowMs || 0) > 0) parts.push("getLastRow " + r.getLastRowMs + " ms");
       if (r.applyBasicFilterBreakdown) {
         var b = r.applyBasicFilterBreakdown;
-        if (b.setBasicFilterApiMs != null) {
-          lines.push("    basicFilter (Sheets API): setBasicFilter " + b.setBasicFilterApiMs + " ms");
-        } else {
-          lines.push("    basicFilter: getRange " + (b.getRangeMs || 0) + " ms, getFilter " + (b.getFilterMs || 0) + " ms, createFilter " + (b.createFilterMs || 0) + " ms, buildCriteria " + (b.buildCriteriaMs || 0) + " ms, setColumnFilterCriteria " + (b.setColumnFilterCriteriaMs || 0) + " ms");
-        }
+        if ((b.getFilterMs || 0) > 0) parts.push("getFilter " + b.getFilterMs + " ms");
+        if ((b.createFilterMs || 0) > 0) parts.push("createFilter " + b.createFilterMs + " ms");
+        if ((b.setColumnFilterCriteriaMs || 0) > 0) parts.push("setColumnFilterCriteria " + b.setColumnFilterCriteriaMs + " ms");
       }
+      if (parts.length) lines.push("  refresh: " + parts.join(", "));
     }
     return lines.length ? "\n" + lines.join("\n") : "";
   }
@@ -732,7 +745,7 @@
               if (r2 && r2.ok) {
                 // var setupTotalMs = Date.now() - setupStart;
                 // var setupDetail = (r2.timingBreakdown) ? formatTimingBreakdown(r2.timingBreakdown, setupTotalMs, r2.serverMs) : "";
-                setStatus("Setup complete. Criteria updated.", false); // was: + round-trip + setupDetail
+                setStatus("Setup complete. Criteria updated.", false); // + round-trip + setupDetail
               } else {
                 setStatus((r2 && r2.message) || "Error.", true);
               }
