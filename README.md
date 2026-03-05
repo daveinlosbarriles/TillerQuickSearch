@@ -20,6 +20,8 @@ A Google Apps Script sidebar for **Tiller** (https://tiller.com/) spreadsheets t
 
 This search function is produced by a Tiller user, and is not associated with Tiller corporation.
 
+<img width="3840" height="2063" alt="TillerQuickSearch Screenshot" src="https://github.com/user-attachments/assets/80d36566-54d4-40f0-b86d-35040a49a8e1" />
+
 ---
 
 ## What you need
