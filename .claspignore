@@ -1,0 +1,2 @@
+# Only push root-level script files; do not push the Amazon CSV public repo copy
+TillerAmazonOrdersCSVImport/**

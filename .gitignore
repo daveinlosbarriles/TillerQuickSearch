@@ -1,3 +1,4 @@
-# Exclude non–Quick Search add-ons from this repo
-amazonorders.gs
-AmazonOrdersDialog.html
+# Amazon CSV Import is a separate GitHub repo. Clone it next to this project or as
+# TillerAmazonOrdersCSVImport/ — do not commit it inside tiller-tools (avoids nested repos).
+# After editing amazonorders.gs / AmazonOrdersDialog.html here, run: bash scripts/sync-amazon-mirror.sh
+TillerAmazonOrdersCSVImport/

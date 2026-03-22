@@ -131,10 +131,23 @@ Your Transactions sheet must have columns that match what Tiller uses (e.g. Date
 
 | File in repo   | In Apps Script   | Purpose |
 |----------------|------------------|--------|
-| Code.js        | Code.gs          | Adds “Tiller Tools” menu and “Quick Search” item |
+| Code.js        | Code.gs          | Adds “Tiller Tools” menu (Quick Search + optional Amazon Orders Import) |
 | QuickSearchSidebar.js | QuickSearchSidebar.gs | All Quick Search logic (criteria, filter, helper columns) |
 | QuickSearch.html      | QuickSearch.html  | Sidebar UI |
+| amazonorders.gs | amazonorders.gs | Amazon Orders CSV import (optional; same Apps Script project when using clasp) |
+| AmazonOrdersDialog.html | AmazonOrdersDialog.html | Import dialog HTML |
 | appsscript.json       | (project config) | Script settings; usually auto-managed by Apps Script |
+
+### Maintainer: two GitHub repos, one clasp project
+
+**Quick Search** lives in this repo. **Amazon Orders Import** is maintained in a [separate GitHub repo](https://github.com/daveinlosbarriles/TillerAmazonOrdersCSVImport). Your Google Apps Script project can include both; `clasp push` from this folder uploads all root `.gs`/`.html` files.
+
+The folder `TillerAmazonOrdersCSVImport/` is **gitignored** here—clone that repo beside this one if you need to push Amazon changes to GitHub. After editing `amazonorders.gs` or `AmazonOrdersDialog.html` in **this** repo, sync the mirror and push there:
+
+```bash
+bash scripts/sync-amazon-mirror.sh
+cd TillerAmazonOrdersCSVImport && git add -A && git commit -m "…" && git push
+```
 
 ---
 
