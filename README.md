@@ -25,6 +25,8 @@ This software is produced by a Tiller user and is not affiliated with Tiller LLC
 11. Wait 30-50 seconds
 12. New transactions appear on the Transactions tab, pre-filtered to show just those.
 
+![Tiller Amazon Import sidebar with ZIP selected; Transactions tab filtered to imported rows](docs/screenshots/amazon-import-transactions-filtered.png)
+
 ## Tiller Quick Search Process
 This is as simple as it sounds.  
 1. Click **Tiller Tools** / **Tiller Amazon Import**.  The QuickSearch sidebar appears.
