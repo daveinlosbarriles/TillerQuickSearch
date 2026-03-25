@@ -33,6 +33,8 @@ This is as simple as it sounds.
 2. Enter in your criteria, and hit **enter** key or **Search** button at any time to see filtered results.
 3. Click on the Description link in the sidebar to see examples of more complex searches such as Amazon | Walmart NOT Costco
 
+![Tiller Quick Search sidebar with Description filter and spreadsheet](docs/screenshots/quick-search-sidebar.png)
+
 ---
 
 ## Install
