@@ -2,27 +2,38 @@
 
 One GitHub repo and Apps Script project for **Tiller** (https://tiller.com/) spreadsheets:
 
-- **Tiller Amazon Import** — sidebar wizard: upload Amazon’s **orders data ZIP**, map payment types on the **AMZ Import** tab, and append purchase/return rows to your **Transactions** sheet with balancing **offsets** where needed.
-- **Tiller Quick Search** — sidebar to filter **Transactions** by date, amount, description, account, and category (basic filter + helper columns).
-
-**Single source of truth:** [github.com/daveinlosbarriles/TillerTools](https://github.com/daveinlosbarriles/TillerTools) — documentation, code, and **screenshots** for both tools live here (see [docs/screenshots/](docs/screenshots/)).
+- **Tiller Amazon Import** — sidebar wizard: upload Amazon’s **orders data ZIP**, and insert your Amazon orders, returns, digital orders, and digital returns in to Tiller.
+- **Tiller Quick Search** — sidebar to filter **Transactions** by date, amount, description, account, and category (basic filter + helper columns).  See your search criteria for all key fields at all times, use date ranges, boolean operators in the description, and easily modify. 
 
 This software is produced by a Tiller user and is not affiliated with Tiller LLC.
 
-## Privacy, terms, and contact
+## Tiller Amazon Import Process
 
-| Document | Link |
-|----------|------|
-| Privacy Policy | [PRIVACY.md](PRIVACY.md) · [on GitHub](https://github.com/daveinlosbarriles/TillerTools/blob/master/PRIVACY.md) |
-| Terms of Service | [TERMS.md](TERMS.md) · [on GitHub](https://github.com/daveinlosbarriles/TillerTools/blob/master/TERMS.md) |
+1. Request your orders.zip data file from Amazon https://www.amazon.com/hz/privacy-central/data-requests/preview.html
+2. Click **Tiller Tools** / **Tiller Amazon Import**.  The Amazon Import sidebar appears.
+3. **Select your zip file**, and click **Next**
+4. The contents of the zip file are examined - these types of transactions can be imported:
+   - Orders (including Whole Foods groceries)
+   - Digital Orders
+   - Order returns
+   - Digital returns
+6. **Uncheck** any transaction types you don't want to import
+7. Ignore orders older than a certain date - default is 6 months, which is usually fine.  Duplicates are never created.
+8. **Set a category for offset transactions** - normally Amazon or Transfer
+9. If this is your first import, or if you have new credit cards in Amazon, **Check for new payment methods**
+10. Click the **Import** button
+11. Wait 30-50 seconds
+12. New transactions appear on the Transactions tab, pre-filtered to show just those.
 
-Questions: **tillertoolsbydave@gmail.com**
+## Tiller Quick Search Process
+This is as simple as it sounds.  
+1. Click **Tiller Tools** / **Tiller Amazon Import**.  The QuickSearch sidebar appears.
+2. Enter in your criteria, and hit <enter> or search at any time to see filtered results.
+3. Click on the Description link in the sidebar to see examples of more complex searches such as Amazon | Walmart NOT Costco
 
 ---
 
-## Install (supported path: bound script, copy/paste)
-
-**This is the documented install:** bind the project to your Tiller spreadsheet and paste the files in the Apps Script editor. A future **Google Workspace Marketplace** add-on is *not* part of these instructions; the repo still contains `appsscript.json` add-on metadata for developers who use **clasp**.
+## Install
 
 ### Step 1: Open Apps Script and add files
 
@@ -45,8 +56,6 @@ Questions: **tillertoolsbydave@gmail.com**
    | [`amazonorders.gs`](amazonorders.gs) | `amazonorders` | All Amazon CSV pipelines |
    | [`AmazonOrdersSidebar.html`](AmazonOrdersSidebar.html) | `AmazonOrdersSidebar` | Import sidebar (matches `HtmlService.createHtmlOutputFromFile("AmazonOrdersSidebar")`) |
 
-   **Quick Search only:** omit the three Amazon files and remove the **Tiller Amazon Import** line from `Code.gs` (see comments in `Code.js`).
-
 4. **Save** the project (Ctrl+S) and give it a name (e.g. “Tiller Tools”) if prompted.
 
 ### Step 2: Enable Google Sheets API (Quick Search)
@@ -63,49 +72,27 @@ Quick Search uses the **Sheets API**.
 2. Use the **Tiller Tools** menu on the menu bar (**Extensions** may also list the same items depending on your workspace).
 3. Choose **Tiller Amazon Import** or **Tiller Quick Search**. The first run opens Google **authorization** (Advanced → continue to your project → Allow). The script only accesses the current spreadsheet.
 
-### For developers (optional): clasp
-
-From a clone of this repo, `clasp login`, link or clone the Apps Script project, then `clasp push` to sync `.gs` / `.html` / `appsscript.json`. See [`.claspignore`](.claspignore) for paths excluded from upload.
-
-**OAuth scopes** declared in [`appsscript.json`](appsscript.json) include Spreadsheets (current only) and `script.container.ui`. Match these on the Cloud **OAuth consent screen** if you publish an add-on later.
-
 ---
 
-## What you need in the spreadsheet
+## What you need in Tiller
 
-- **Transactions** — Tiller column headers in row 1 (Date, Description, Amount, Account, etc.). Amazon import reads target column names from the **AMZ Import** sheet (**Tiller column labels** section).
-- **Categories** — Quick Search builds the category list from column A (category) and B (group) from row 2 down.
-- **Accounts** — Quick Search reads account names from column **J**, row 2 down; rows with **Hide** in column **Q** are skipped.
-- **AMZ Import** — created automatically the first time you run Amazon import, with default payment tables and Tiller label mapping. Edit payment **Type → Account** mappings here before importing if the wizard flags unknown methods.
+- **Transactions tab** — Tiller column headers in row 1 (Date, Description, Amount, Account, etc.). Amazon import reads target column names from the **AMZ Import** sheet (**Tiller column labels** section).
+- **Categories tab** — Both Amazon Import and Quick Search builds the category list from column A (category) and B (group) from row 2 down.
+- **Accounts tab** — Quick Search reads account names from column **J**, row 2 down; rows with **Hide** in column **Q** are skipped.
+- **AMZ Import** — This tab is created automatically the first time you run Amazon import, with default payment tables and Tiller label mapping. Edit payment **Amazon Payment Type → Account** mappings here before importing if the wizard flags unknown credit cards.
 
 ---
-
-## Tiller Amazon Import — how it works
-
-This project is the **ZIP** sidebar wizard (**Tiller Amazon Import**, `amazonorders.gs` + `AmazonOrdersSidebar.html`): **chunked** server imports, **Quick Search** in the same Apps Script project, and pipelines for physical orders, **Orders returns**, digital orders, and digital returns. **AMZ Import** sheet tables work the same way as in earlier single-CSV builds — only file names and UI differ.
 
 ### What this importer does
 
 - Converts Amazon **ZIP** export data into Tiller **Transactions** rows (orders, digital items, physical refunds, digital returns — according to what you select and what files Amazon included).
 - Prevents **duplicate** imports using stable keys in each row’s **Metadata** JSON (so dedup still works if you edit **Full Description** text).
+- Backwardly comptible with the older Amazon order import
 - Prefixes lines **[AMZ]** (physical / Order History–style) or **[AMZD]** (digital) on descriptions where applicable; **Account** fields come from **AMZ Import** (payment method → account table).
 - Writes **balancing offset** rows so you are not double-counting the same spend against both a card charge and Amazon line items (see wizard **Category for offsets** help).
-- After a full ZIP run, **sorts** Transactions and applies a **Metadata** filter for this import’s timestamp so you can focus on rows from that run.
+- After the import completes, **sorts** Transactions and applies a filter on the **Metadata** column for this import’s timestamp so you can focus on rows from that run.
 
-### Get your data from Amazon
-
-Use Amazon’s **privacy / data request** flow to download a ZIP of your orders (the sidebar links to [Amazon’s Request My Data portal](https://www.amazon.com/hz/privacy-central/data-requests/preview.html); choose **Your Orders** / submit as Amazon directs). When the email arrives, download the ZIP and use **Choose orders ZIP file** in the wizard.
-
-### How to use it (this repo)
-
-1. Open your Tiller spreadsheet and choose **Tiller Tools** → **Tiller Amazon Import**.
-2. Pick the **ZIP**, enable the order types you want, set **Ignore orders older than** if you need a cutoff (use a date that overlaps a bit with your last import).
-3. Complete **payment method** review if the wizard shows it; fix **AMZ Import** payment rows if anything is **Unknown**.
-4. Click **Import** and leave the sidebar open until the log shows completion.
-
-**Tips:** Copy the spreadsheet and try there first. To undo later, filter **Metadata** with **contains** `Imported by AmazonCSVImporter` and delete those rows.
-
-### What the ZIP can contain
+### Amazon Zip File Details
 
 The importer looks for these names (case-insensitive paths inside the ZIP):
 
@@ -116,13 +103,11 @@ The importer looks for these names (case-insensitive paths inside the ZIP):
 | **Digital Content Orders.csv** | Digital purchases |
 | **Digital Returns.csv** | Digital returns |
 
-Not every export includes every file; the wizard lists which ones it found.
-
 ### Order History vs Digital Content Orders (CSV detection)
 
-For **Order History.csv** and **Digital Content Orders.csv**, file type is detected from the **header row** using marker columns (defaults: **`Digital Order Item ID`** for digital, **`Carrier Name & Tracking Number`** for standard). Digital wins if both appear. On newer **AMZ Import** tabs, the first rows under **Source file** `_file_detection` let you change those marker header names if Amazon renames them.
+For **Order History.csv** and **Digital Content Orders.csv**, file type is detected from the **header row** using marker columns (defaults: **`Digital Order Item ID`** for digital, **`Carrier Name & Tracking Number`** for standard). Digital wins if both appear. On the **AMZ Import** tab, the first rows under **Source file** `_file_detection` let you change those marker header names if Amazon renames them.
 
-**Which CSV header maps to which logical field and metadata key** is configured in one **CSV column map** table: **Source file** | **Header** | **Name in code** | **Metadata field name**. Refund Details, Returns, and Digital Returns rows in that same table drive the returns pipelines. **AMZ Import** must include that table (first run seeds it); if your tab predates this layout, delete **AMZ Import** and open the sidebar again to recreate defaults. Every non-empty mapped column for that file type must exist in the CSV. For digital imports, **exactly one** payment row must have **Use for Digital orders?** = **Yes**. If Amazon renames columns, update the sheet — no code change.
+**Which CSV header maps to which logical field and metadata key** is configured in one **CSV column map** table: **Source file** | **Header** | **Name in code** | **Metadata field name**. Refund Details, Returns, and Digital Returns rows in that same table drive the returns pipelines. **AMZ Import** must include that table (first run seeds it). Every non-empty mapped column for that file type must exist in the CSV. For digital imports, **exactly one** payment row must have **Use for Digital orders?** = **Yes**. If Amazon renames columns, update the sheet — no code change.
 
 ### Tiller columns written (typical)
 
@@ -132,7 +117,7 @@ For **Order History.csv** and **Digital Content Orders.csv**, file type is detec
 | **Description** | `[AMZ]` / `[AMZD]` (and similar) + short text / product title per pipeline |
 | **Full Description** | Longer line (often Order ID, title, ASIN where applicable) |
 | **Amount** | Line amount |
-| **Transaction ID** | Unique id |
+| **Transaction ID** | New unique id |
 | **Date Added** | Import run time |
 | **Account** | From **AMZ Import** by payment type or digital row |
 | **Account #** / **Institution** / **Account ID** | Same routing |
@@ -155,33 +140,6 @@ The **AMZ Import** tab holds all routing. **First run** creates it with defaults
   **Name in Code** | **Tiller label** — must match your **Transactions** header row (Date, Metadata, etc.).
 
 If a payment type is missing, add a payment row with the **exact** Amazon string.
-
-### Wizard steps (summary)
-
-1. **ZIP** — Select the file; **Next** reads the archive in the browser (JSZip).
-2. **Options** — **Orders**, **Orders Returns**, **Digital orders**, **Digital returns**, **Whole Foods / Amazon Fresh** (website filter on Order History).
-3. **Cutoff** — **Ignore orders older than** (rows on that calendar day are included).
-4. **Category for offsets** — Optional Tiller category for offset rows.
-5. **Check for new payment methods** — Pause to align unknown types on **AMZ Import** before **Import**.
-6. **Import** — Chunks run on the server (one round trip per main CSV + **finalize** sort/filter). **Do not close the sidebar** until finished.
-
-### After import
-
-- New rows on **Transactions**; status may report *“N duplicate transactions were not imported.”* when Metadata keys already existed.
-- **Show debug messages** — full server timings and diagnostics; off by default for a shorter log.
-
-### Behavior notes
-
-- **Orders returns (Refund Details):** Date from **Refund Date** when parseable; otherwise **Creation Date** when present. **$0** refund totals are skipped with no extra messages. CSV needs **Order ID**, **Refund Amount**, **Website**, and at least one of **Refund Date** or **Creation Date**.
-- **Offsets:** Purchase/refund pipelines add offset rows per in-code rules; use **AMZ Import** + wizard hints so accounts match your Tiller **Accounts** tab.
-
-### Processing outline
-
-1. Read **AMZ Import** config (payment accounts, CSV column map, Tiller labels).
-2. For each selected pipeline, parse the relevant CSV (from ZIP text), detect standard vs digital where applicable, validate mapped headers.
-3. Resolve payment / digital account rows; build rows and Metadata; skip duplicates via existing **Metadata** keys.
-4. Append rows; add offsets as needed.
-5. **Finalize:** sort by date (newest first) and set Metadata filter for this bundle’s import timestamp.
 
 ---
 
@@ -206,19 +164,11 @@ If a payment type is missing, add a payment row with the **exact** Amazon string
 
 ### First-time use: two new columns
 
-The first time you search, the script may add **QuickSearch** and **QuickCriteria** on the right of **Transactions**. You can delete them; they are recreated on the next search if missing.
+The first time you search, the script will add **QuickSearch** and **QuickCriteria** columns on the right side of the **Transactions** tab. You can delete them; they are recreated on the next search if missing.
 
 ### How the filter works
 
 Quick Search applies a **basic filter** so only rows where **QuickSearch** is TRUE are shown. You can combine with other filter dropdowns as usual.
-
----
-
-## Usage tips
-
-- **Quick Search:** set criteria, then **Search**.
-- **Amazon import:** complete payment review if prompted, then **Import**. Use **Start over** to pick a new ZIP.
-- **Description** regex and **` but not `** syntax: see examples above and the sidebar help on **Description**.
 
 ---
 
@@ -247,6 +197,15 @@ Add or replace images under **[docs/screenshots/](docs/screenshots/)** and link 
 
 ## To uninstall
 
-1. **Extensions** → **Apps Script** — remove or edit **Code.gs** so the menu is gone; delete **QuickSearchSidebar.gs**, **QuickSearch.html**, `amazonorders.gs`, **AmazonOrdersSidebar.html** as needed.
-2. Optionally delete **QuickSearch** / **QuickCriteria** columns on **Transactions**.
-3. Optionally **Data** → **Turn off filter** on **Transactions**.
+1. **Extensions** → **Apps Script** — remove or edit **Code.gs** so the menu is gone; delete **QuickSearchSidebar.gs**, **QuickSearch.html**, **amazonorders.gs**, **AmazonOrdersSidebar.html** .
+2. Delete **QuickSearch** / **QuickCriteria** columns on **Transactions**.
+3. Delete **AMZ Import** tab 
+
+## Privacy, terms, and contact
+
+| Document | Link |
+|----------|------|
+| Privacy Policy | [PRIVACY.md](PRIVACY.md) |
+| Terms of Service | [TERMS.md](TERMS.md) |
+
+Questions: **tillertoolsbydave@gmail.com**
