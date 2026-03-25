@@ -64,6 +64,6 @@ You may stop using the Add-on at any time by uninstalling it. The developer may 
 
 For questions about these Terms, contact:
 
-- **Email:** [tillertools.app@gmail.com](mailto:tillertools.app@gmail.com)
+- **Email:** [tillertoolsbydave@gmail.com](mailto:tillertoolsbydave@gmail.com)
 
 See also: [Privacy Policy](PRIVACY.md).
