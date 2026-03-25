@@ -23,7 +23,7 @@ The add-on processes user-provided data solely for the purpose of:
 
 - Parsing Amazon order history files uploaded by the user
 - Formatting transaction data for compatibility with Tiller spreadsheets
-- Writing transaction data into the user’s Google Sheets
+- Writing transaction data into the user’s Tiller Transaction tab
 
 No data is used for analytics, advertising, or tracking.
 
