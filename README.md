@@ -74,6 +74,8 @@ The manifest is **not** added with **+ → Script / HTML**. It controls **time z
 
 For **menu-only / personal** use you can delete the optional `"addOns": { ... }` block afterward to keep the manifest smaller; `Code.js` and the sidebars do not require it. Do **not** remove `oauthScopes`, `runtimeVersion`, or the `dependencies.enabledAdvancedServices` entry for **Sheets** if you use Quick Search.
 
+![Apps Script editor: project files, add Script/HTML, and Sheets under Services](docs/screenshots/apps-script-editor-sheets-service.png)
+
 ### Step 2: Enable Google Sheets API (Quick Search)
 
 Quick Search uses the **Sheets API**. Pasting the repo `appsscript.json` already declares the **Sheets** advanced service; still confirm it is active.
