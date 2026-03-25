@@ -596,7 +596,8 @@
           .split(/\r\n|\r|\n/)
           .filter(function (line) {
             var s = line;
-            if (/^\s*Server:\s/.test(s) && !/^\s*Server:\s*sort\s+sheet\b/i.test(s)) return false;
+            if (/^\s*===\s*Transactions sheet\s*===\s*$/i.test(s.trim())) return false;
+            if (/^\s*Server:\s/.test(s)) return false;
             if (/^\s*Detected file type:\s/.test(s)) return false;
             if (/\d+\s+order\(s\)\s+had\s+a\s+net\s+total\s+of\s+\$0\b/.test(s)) return false;
             return true;

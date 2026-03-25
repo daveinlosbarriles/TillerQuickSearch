@@ -2174,7 +2174,7 @@ function importAmazonRecent(csvText, months, options) {
   if (!output.length) {
     let msg = "No new transactions found";
     if (duplicateCount > 0) {
-      msg += "\n" + duplicateCount + " duplicate transactions were found and were not imported.";
+      msg += "\n" + duplicateCount + " duplicate transactions were not imported.";
     }
     amzPushSkippedCsvDumpCapNoticeIfNeeded_(timing, skippedRowDump);
     return detectedLabel + "\n" + msg + (timing.length ? "\n" + timing.join("\n") : "");
@@ -2277,7 +2277,7 @@ function importAmazonRecent(csvText, months, options) {
 
   let summary = output.length + " transactions imported";
   if (duplicateCount > 0) {
-    summary += "\n" + duplicateCount + " duplicate transactions were found and were not imported.";
+    summary += "\n" + duplicateCount + " duplicate transactions were not imported.";
   }
   if (offsetSkippedZeroNet > 0) {
     summary +=
