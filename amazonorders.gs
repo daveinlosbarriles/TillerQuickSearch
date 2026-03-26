@@ -1351,7 +1351,7 @@ function amzNormalizeAsinDedupKey_(s) {
 }
 
 /**
- * Add stable dedup key(s) for one parsed {@code parsed.amazon} object (import / legacy shapes).
+ * Add stable dedup key(s) for one parsed {@code parsed.amazon} object (current and older metadata shapes).
  * @param {Object} amz
  * @param {Set<string>} setObj
  */
@@ -1395,7 +1395,7 @@ function amzAddDedupKeysForAmazonMeta_(amz, setObj) {
   if (t === "purchase") {
     const oid = amz.id != null ? String(amz.id).trim() : "";
     if (!oid) return;
-    // Digital Content Orders (aggregated per Order ID) always set lineItemCount; legacy physical does not.
+    // Digital Content Orders (aggregated per Order ID) always set lineItemCount; physical line-item rows do not.
     if (amz.lineItemCount != null && String(amz.lineItemCount).trim() !== "") {
       setObj.add("digital-purchase|" + oid);
       return;
@@ -2282,7 +2282,8 @@ function importAmazonRecent(csvText, months, options) {
 
   const orderIdsForOffset = Object.keys(perOrderOffset);
   let offsetSkippedZeroNet = 0;
-  let offsetSkippedNoAccount = 0;
+  /** Offsets written with empty Account fields because AMZ Import had no row for this payment / digital user. */
+  let offsetBlankAccountFields = 0;
   for (let oi = 0; oi < orderIdsForOffset.length; oi++) {
     const oidKey = orderIdsForOffset[oi];
     const po = perOrderOffset[oidKey];
@@ -2291,13 +2292,12 @@ function importAmazonRecent(csvText, months, options) {
       offsetSkippedZeroNet += 1;
       continue;
     }
-    const accountRow = isDigital
-      ? config.digitalUserAccount
-      : paymentAccounts[po.payKey];
-    if (!accountRow) {
-      offsetSkippedNoAccount += 1;
-      continue;
-    }
+    const resolvedAccount = isDigital ? config.digitalUserAccount : paymentAccounts[po.payKey];
+    // Every order that received line items in this run must get an offset when net ≠ 0. If payment → account
+    // mapping is missing, still write the offset with blank Account / Institution fields so the user can fix
+    // AMZ Import and assign the row manually without hunting for a "missing" offset.
+    if (!resolvedAccount) offsetBlankAccountFields += 1;
+    const accountRow = resolvedAccount || amzEmptyAccountRow();
 
     const orderDateForOffset = new Date(po.orderDate.getTime());
     orderDateForOffset.setHours(0, 0, 0, 0);
@@ -2381,11 +2381,11 @@ function importAmazonRecent(csvText, months, options) {
       offsetSkippedZeroNet +
       " order(s) had a net total of $0 after summing line items — no offset row (offsets only apply when net is non-zero).";
   }
-  if (offsetSkippedNoAccount > 0) {
+  if (offsetBlankAccountFields > 0) {
     summary +=
       "\n" +
-      offsetSkippedNoAccount +
-      " order(s) had no matching payment account for the offset — no offset row (add the payment type on AMZ Import).";
+      offsetBlankAccountFields +
+      " offset row(s) have blank Account fields — add the payment type on AMZ Import (or assign accounts manually on Transactions).";
   }
   amzPushSkippedCsvDumpCapNoticeIfNeeded_(timing, skippedRowDump);
   timing.unshift(summary);
