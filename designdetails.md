@@ -227,9 +227,9 @@ This section records **actual column order** from Amazon **Request My Data** exp
 
 | Creation Date | Currency | Direct Debit | Disbursement Type | Order ID | Payment Status | Quantity | Refund Amount | Refund Date | Reversal Action | Reversal Reason | Reversal Status | Website |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| 2010-12-2 | USD | 0 | Refund | 104-94383… | Completed | 1 | 19.7 | 2010-12-2 | Final | Item not received… | Completed | Amazon.com… |
-| 2022-08-1 | USD | 0 | Refund | 114-95246… | Completed | 1 | 0.82 | 2022-08-1 | Final | Export fee | Completed | Amazon.com… |
-| 2019-08-3 | USD | 0 | Refund | 113-99448… | Completed | 1 | 8.8 | 2019-08-3 | Final | Customer | Completed | Amazon.com… |
+| 2010-12-2 | USD | 0 | Refund | 104-94383… | Completed | 1 | 19.7 | 2010-12-2 | Final | Item not re… | Completed | Amazon.co… |
+| 2022-08-1 | USD | 0 | Refund | 114-95246… | Completed | 1 | 0.82 | 2022-08-1 | Final | Export fee | Completed | Amazon.co… |
+| 2019-08-3 | USD | 0 | Refund | 113-99448… | Completed | 1 | 8.8 | 2019-08-3 | Final | Customer | Completed | Amazon.co… |
 
 **Observed details**
 
