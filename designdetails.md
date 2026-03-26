@@ -221,33 +221,26 @@ This section records **actual column order** from Amazon **Request My Data** exp
 
 ### 11.1 Refund Details.csv (`refund details.csv`)
 
-**Source:** Your export, **13 columns**, left-to-right. Spreadsheet column titles were **width-truncated** in the UI; the authoritative strings are **row 1 of the CSV file** — paste that line into the block below when you want this doc to match byte-for-byte.
+**13 columns**, left-to-right. Headers and sample rows below match a **verified export / sheet view** (some cells were column-truncated in the UI; Order IDs and similar show `…` where the grid cut off text).
 
-**Exact header row (paste from CSV):**
+**Refund Details — column headers and sample rows**
+
+| Creation Date | Currency | Direct Debit | Disbursement Type | Order ID | Payment Status | Quantity | Refund Amount | Refund Date | Reversal Action | Reversal Reason | Reversal Status | Website |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| 2010-12-2 | USD | 0 | Refund | 104-94383… | Completed | 1 | 19.7 | 2010-12-2 | Final | Item not received… | Completed | Amazon.com… |
+| 2022-08-1 | USD | 0 | Refund | 114-95246… | Completed | 1 | 0.82 | 2022-08-1 | Final | Export fee | Completed | Amazon.com… |
+| 2019-08-3 | USD | 0 | Refund | 113-99448… | Completed | 1 | 8.8 | 2019-08-3 | Final | Customer | Completed | Amazon.com… |
+
+**Observed details**
+
+- **Dates:** `YYYY-MM-D` in these samples (day not always zero-padded, e.g. `2010-12-2`).
+- **No Contract ID column** in this layout. Legacy-return dedup still uses sheet **Metadata** / **Full Description** (§4).
+
+**Header row as comma-separated (for mapping checks):**
 
 ```text
-(TODO: paste comma-separated header line from Refund Details.csv)
+Creation Date,Currency,Direct Debit,Disbursement Type,Order ID,Payment Status,Quantity,Refund Amount,Refund Date,Reversal Action,Reversal Reason,Reversal Status,Website
 ```
-
-**Column order as visible in your sheet (truncated labels → full names not assumed beyond obvious matches):**
-
-| # | Visible in sheet | Notes |
-|---|------------------|--------|
-| 1 | Creation D… | **Creation Date** |
-| 2 | Currency | |
-| 3 | Direct D… | Full header not read from CSV here |
-| 4 | Disbursem… | Full header not read from CSV here |
-| 5 | Order ID | |
-| 6 | Payment S… | Full header not read from CSV here |
-| 7 | Quantity | |
-| 8 | Refund Am… | **Refund Amount** |
-| 9 | Refund Da… | **Refund Date** |
-| 10 | Reversal A… | Full header not read from CSV here |
-| 11 | Reversal R… | Full header not read from CSV here |
-| 12 | Reversal S… | Full header not read from CSV here |
-| 13 | Website | |
-
-**No Contract ID column** in this layout. Legacy-return dedup still uses sheet **Metadata** / **Full Description** (§4).
 
 **Process:** Prefer **asking you** or reading **§11** / the CSV over guessing Amazon’s column strings when implementing or reviewing mappings.
 
