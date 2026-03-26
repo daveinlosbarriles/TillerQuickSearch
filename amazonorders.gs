@@ -200,6 +200,23 @@ const AMZ_REQUIRED_TILLER_LABEL_KEYS = [
   "ACCOUNT_NUMBER", "INSTITUTION", "ACCOUNT_ID", "METADATA"
 ];
 
+/** Transactions columns written on each import row (excludes SHEET_NAME) — resolve via {@link amzGetTillerColumnIndex_}. */
+const AMZ_WRITTEN_TILLER_LABEL_KEYS = [
+  "DATE",
+  "DESCRIPTION",
+  "AMOUNT",
+  "TRANSACTION_ID",
+  "FULL_DESCRIPTION",
+  "DATE_ADDED",
+  "MONTH",
+  "WEEK",
+  "ACCOUNT",
+  "ACCOUNT_NUMBER",
+  "INSTITUTION",
+  "ACCOUNT_ID",
+  "METADATA"
+];
+
 const AMZ_IMPORT_INVALID_MSG = "AMZ Import configuration settings are missing or invalid. Suggest deleting that tab to load default values.";
 const AMZ_IMPORT_MISSING_CSV_MAP_MSG =
   "AMZ Import must include the CSV column map (header row: Source file, Header, Name in code, Metadata field name). Delete the AMZ Import tab to recreate defaults.";
@@ -552,8 +569,8 @@ function amzCutoffStartOfDay_(userCutoff) {
  */
 function amzApplyTransactionsSortAndFilterCore_(ss, sheet, tillerCols, tillerLabels, sheetName, filterSubstr) {
   const lines = [];
-  const metaCol = tillerCols[tillerLabels.METADATA];
-  const willSetMetadataFilter = metaCol && filterSubstr !== "";
+  const metaCol = amzGetTillerColumnIndex_(tillerCols, tillerLabels.METADATA);
+  const willSetMetadataFilter = metaCol != null && metaCol >= 1 && filterSubstr !== "";
 
   // Sort must run on the full data range; an active filter can block rows from reordering.
   try {
@@ -567,16 +584,19 @@ function amzApplyTransactionsSortAndFilterCore_(ss, sheet, tillerCols, tillerLab
   SpreadsheetApp.flush();
 
   const tSortStart = Date.now();
-  const dateCol = tillerCols[tillerLabels.DATE];
+  const dateCol = amzGetTillerColumnIndex_(tillerCols, tillerLabels.DATE);
   let sortLastRow = 0;
   try {
     sortLastRow = sheet.getLastRow();
   } catch (e) {
     sortLastRow = 0;
   }
-  const sortLastCol = Math.max(amzNumColsForTransactionRowsSafe(sheet, tillerCols), dateCol);
+  const sortLastCol = Math.max(
+    amzNumColsForTransactionRowsSafe(sheet, tillerCols),
+    dateCol != null ? dateCol : 1
+  );
 
-  if (sortLastRow >= 2 && sortLastCol >= 1 && dateCol >= 1) {
+  if (sortLastRow >= 2 && sortLastCol >= 1 && dateCol != null && dateCol >= 1) {
     try {
       // Prefer Range.sort on data rows only — much faster than Sheet.sort on large grids.
       const sortRange = sheet.getRange(2, 1, sortLastRow, sortLastCol);
@@ -733,7 +753,7 @@ function amzApplyTransactionsSortAndFilter(importTimestampStr, opts) {
     return ["Error: Sheet '" + sheetName + "' not found."];
   }
   const tillerCols = amzGetTillerColumnMap(sheet);
-  if (!tillerCols[tillerLabels.DATE]) {
+  if (amzGetTillerColumnIndex_(tillerCols, tillerLabels.DATE) == null) {
     return ["Error: Transactions sheet is missing Date column."];
   }
   let filterSubstr = "";
@@ -770,7 +790,7 @@ function TestFilterSort() {
     return lines.join("\n");
   }
   const tillerCols = amzGetTillerColumnMap(sheet);
-  const metaCol = tillerCols[tillerLabels.METADATA];
+  const metaCol = amzGetTillerColumnIndex_(tillerCols, tillerLabels.METADATA);
   if (!metaCol) {
     lines.push(
       "Error: Metadata column not found (Tiller label: \"" + String(tillerLabels.METADATA) + "\")."
@@ -1123,6 +1143,48 @@ function amzGetTillerColumnIndex_(tillerCols, headerLabel) {
 }
 
 /**
+ * Ensures every written Tiller label maps to a Transactions header (case-insensitive).
+ * @returns {string|null} Error message or null.
+ */
+function amzValidateTransactionsImportColumns_(tillerCols, tillerLabels) {
+  const missing = [];
+  for (let i = 0; i < AMZ_WRITTEN_TILLER_LABEL_KEYS.length; i++) {
+    const key = AMZ_WRITTEN_TILLER_LABEL_KEYS[i];
+    const lab = tillerLabels[key];
+    if (lab == null || String(lab).trim() === "") {
+      missing.push('AMZ Import Name in Code "' + key + '" is empty');
+      continue;
+    }
+    if (amzGetTillerColumnIndex_(tillerCols, lab) == null) {
+      missing.push(
+        'no column header matching "' + String(lab).trim() + '" (' + key + ")"
+      );
+    }
+  }
+  if (missing.length) {
+    return (
+      "Error: Transactions sheet headers or AMZ Import Tiller labels: " +
+      missing.join("; ") +
+      "."
+    );
+  }
+  return null;
+}
+
+/**
+ * 1-based indices for columns written on import rows (call after validation).
+ * @returns {Object<string, number>}
+ */
+function amzWrittenTillerIndices_(tillerCols, tillerLabels) {
+  const o = {};
+  for (let i = 0; i < AMZ_WRITTEN_TILLER_LABEL_KEYS.length; i++) {
+    const key = AMZ_WRITTEN_TILLER_LABEL_KEYS[i];
+    o[key] = amzGetTillerColumnIndex_(tillerCols, tillerLabels[key]);
+  }
+  return o;
+}
+
+/**
  * Set Description + Full Description on an import row array (0-based indices).
  */
 function amzSetRowDescriptionFields_(row, tillerCols, tillerLabels, descriptionText, fullDescriptionText) {
@@ -1199,24 +1261,9 @@ function amzEnsureSheetGridCovers(sh, lastRow, lastCol) {
 
 /** Largest 1-based column index among Tiller label fields written on each import row (not SHEET_NAME). */
 function amzMaxRequiredTillerColumn(tillerCols, tillerLabels) {
-  const keys = [
-    "DATE",
-    "DESCRIPTION",
-    "AMOUNT",
-    "TRANSACTION_ID",
-    "FULL_DESCRIPTION",
-    "DATE_ADDED",
-    "MONTH",
-    "WEEK",
-    "ACCOUNT",
-    "ACCOUNT_NUMBER",
-    "INSTITUTION",
-    "ACCOUNT_ID",
-    "METADATA"
-  ];
   let m = 1;
-  for (let i = 0; i < keys.length; i++) {
-    const c = tillerCols[tillerLabels[keys[i]]];
+  for (let i = 0; i < AMZ_WRITTEN_TILLER_LABEL_KEYS.length; i++) {
+    const c = amzGetTillerColumnIndex_(tillerCols, tillerLabels[AMZ_WRITTEN_TILLER_LABEL_KEYS[i]]);
     if (typeof c === "number" && !isNaN(c)) m = Math.max(m, c);
   }
   return m;
@@ -1233,12 +1280,27 @@ function amzNumColsForImportRows(sheet, tillerCols, tillerLabels, categoryColNum
   return Math.max(base, cat, 1);
 }
 
-/** Log lines for sidebar: resolved Date/Month/Week indices vs numCols (diagnose blank Date when Month/Week ok). */
+/** Log lines for sidebar: resolved column indices, duplicate-index warnings (diagnose blank Date / Date Added / Week). */
 function amzTransactionsColumnDebugLines(sheet, tillerCols, tillerLabels, numCols, categoryColNum) {
-  const dateCol = tillerCols[tillerLabels.DATE];
-  const monthCol = tillerCols[tillerLabels.MONTH];
-  const weekCol = tillerCols[tillerLabels.WEEK];
-  const dh = sheet.getRange(1, dateCol, 1, 1).getDisplayValues()[0][0];
+  const dateCol = amzGetTillerColumnIndex_(tillerCols, tillerLabels.DATE);
+  const monthCol = amzGetTillerColumnIndex_(tillerCols, tillerLabels.MONTH);
+  const weekCol = amzGetTillerColumnIndex_(tillerCols, tillerLabels.WEEK);
+  const dateAddedCol = amzGetTillerColumnIndex_(tillerCols, tillerLabels.DATE_ADDED);
+  const descCol = amzGetTillerColumnIndex_(tillerCols, tillerLabels.DESCRIPTION);
+  const fullDescCol = amzGetTillerColumnIndex_(tillerCols, tillerLabels.FULL_DESCRIPTION);
+  const amountCol = amzGetTillerColumnIndex_(tillerCols, tillerLabels.AMOUNT);
+  const txnIdCol = amzGetTillerColumnIndex_(tillerCols, tillerLabels.TRANSACTION_ID);
+  const acctCol = amzGetTillerColumnIndex_(tillerCols, tillerLabels.ACCOUNT);
+
+  let dh = "";
+  if (dateCol != null && dateCol >= 1) {
+    try {
+      dh = sheet.getRange(1, dateCol, 1, 1).getDisplayValues()[0][0];
+    } catch (e1) {
+      dh = "?";
+    }
+  }
+
   const lines = [
     "Server: Transactions columns — Date: " +
       dateCol +
@@ -1246,15 +1308,54 @@ function amzTransactionsColumnDebugLines(sheet, tillerCols, tillerLabels, numCol
       String(dh) +
       '" expected "' +
       String(tillerLabels.DATE) +
-      '") Month: ' +
+      '") Date Added: ' +
+      dateAddedCol +
+      " Month: " +
       monthCol +
       " Week: " +
       weekCol +
+      " Desc: " +
+      descCol +
+      " Full Desc: " +
+      fullDescCol +
+      " Amount: " +
+      amountCol +
+      " Txn ID: " +
+      txnIdCol +
+      " Account: " +
+      acctCol +
       " numCols: " +
       numCols +
       " dateInRange: " +
-      (dateCol <= numCols)
+      (dateCol != null && dateCol <= numCols)
   ];
+
+  const dupPairs = [
+    ["Date", dateCol],
+    ["Date Added", dateAddedCol],
+    ["Month", monthCol],
+    ["Week", weekCol],
+    ["Description", descCol],
+    ["Full Description", fullDescCol],
+    ["Amount", amountCol],
+    ["Txn ID", txnIdCol],
+    ["Account", acctCol]
+  ];
+  const seen = {};
+  const dupMsgs = [];
+  for (let pi = 0; pi < dupPairs.length; pi++) {
+    const label = dupPairs[pi][0];
+    const c = dupPairs[pi][1];
+    if (c == null || typeof c !== "number") continue;
+    if (seen[c]) dupMsgs.push(seen[c] + " & " + label + " → col " + c);
+    else seen[c] = label;
+  }
+  if (dupMsgs.length) {
+    lines.push(
+      "Server: WARNING: duplicate column indices (text may overwrite dates): " + dupMsgs.join("; ")
+    );
+  }
+
   if (categoryColNum != null && typeof categoryColNum === "number" && !isNaN(categoryColNum)) {
     lines.push(
       "Server: offset Category column: " + categoryColNum + " inRange: " + (categoryColNum <= numCols)
@@ -1319,7 +1420,7 @@ function amzGetLastRowWithValueInColumn(sheet, colNum) {
  * the "end" of the sheet.
  */
 function amzGetLastTransactionDataRow(sheet, tillerCols, tillerLabels) {
-  const dateCol = tillerCols[tillerLabels.DATE];
+  const dateCol = amzGetTillerColumnIndex_(tillerCols, tillerLabels.DATE);
   if (!dateCol) return 1;
   return amzGetLastRowWithValueInColumn(sheet, dateCol);
 }
@@ -1334,7 +1435,7 @@ function amzGetLastTransactionDataRow(sheet, tillerCols, tillerLabels) {
  */
 function amzAppendDuplicateKeysFromTransactions_(sheet, tillerCols, tillerLabels, lastDataRow, existingSet) {
   if (lastDataRow < 2) return;
-  const metaCol = tillerCols[tillerLabels.METADATA];
+  const metaCol = amzGetTillerColumnIndex_(tillerCols, tillerLabels.METADATA);
   if (!metaCol) return;
   const metas = sheet.getRange(2, metaCol, lastDataRow, 1).getValues();
   for (let j = 0; j < metas.length; j++) {
@@ -1938,22 +2039,11 @@ function importAmazonRecent(csvText, months, options) {
   if (!sheet) return "Error: Sheet '" + sheetName + "' not found.";
 
   const tillerCols = amzGetTillerColumnMap(sheet);
-  if (!tillerCols[tillerLabels.METADATA]) {
-    return (
-      "Error: Transactions sheet is missing a column whose header matches the AMZ Import Tiller labels for Metadata (expected \"" +
-      String(tillerLabels.METADATA) +
-      "\")."
-    );
-  }
-  if (!tillerCols[tillerLabels.DATE]) {
-    return (
-      "Error: Transactions sheet is missing a column whose header matches the AMZ Import Tiller labels for Date (expected \"" +
-      String(tillerLabels.DATE) +
-      "\")."
-    );
-  }
+  const colMapErr0 = amzValidateTransactionsImportColumns_(tillerCols, tillerLabels);
+  if (colMapErr0) return colMapErr0;
   const categoryColNum = offsetCategory
-    ? tillerCols["Category"] || tillerCols["Categories"] || null
+    ? amzGetTillerColumnIndex_(tillerCols, "Category") ||
+      amzGetTillerColumnIndex_(tillerCols, "Categories")
     : null;
 
   const tParseStart = Date.now();
@@ -2040,6 +2130,7 @@ function importAmazonRecent(csvText, months, options) {
   }
 
   const numCols = amzNumColsForImportRows(sheet, tillerCols, tillerLabels, categoryColNum);
+  const ci = amzWrittenTillerIndices_(tillerCols, tillerLabels);
   const colDebug = amzTransactionsColumnDebugLines(sheet, tillerCols, tillerLabels, numCols, categoryColNum);
   for (let di = 0; di < colDebug.length; di++) timing.push(colDebug[di]);
 
@@ -2108,18 +2199,18 @@ function importAmazonRecent(csvText, months, options) {
     const metadataValue = "Imported by AmazonCSVImporter on " + importTimestampStr + " " + JSON.stringify({ amazon: amazonMeta });
 
     const rowOut = new Array(numCols).fill("");
-    rowOut[tillerCols[tillerLabels.DATE] - 1] = orderDate;
     amzSetRowDescriptionFields_(rowOut, tillerCols, tillerLabels, descShort, descFull);
-    rowOut[tillerCols[tillerLabels.AMOUNT] - 1] = amount;
-    rowOut[tillerCols[tillerLabels.TRANSACTION_ID] - 1] = amzGenerateGuid();
-    rowOut[tillerCols[tillerLabels.DATE_ADDED] - 1] = runTimestamp;
-    rowOut[tillerCols[tillerLabels.MONTH] - 1] = month;
-    rowOut[tillerCols[tillerLabels.WEEK] - 1] = week;
-    rowOut[tillerCols[tillerLabels.ACCOUNT] - 1] = accountRow.ACCOUNT;
-    rowOut[tillerCols[tillerLabels.ACCOUNT_NUMBER] - 1] = accountRow.ACCOUNT_NUMBER;
-    rowOut[tillerCols[tillerLabels.INSTITUTION] - 1] = accountRow.INSTITUTION;
-    rowOut[tillerCols[tillerLabels.ACCOUNT_ID] - 1] = accountRow.ACCOUNT_ID;
-    rowOut[tillerCols[tillerLabels.METADATA] - 1] = metadataValue;
+    rowOut[ci.DATE - 1] = orderDate;
+    rowOut[ci.AMOUNT - 1] = amount;
+    rowOut[ci.TRANSACTION_ID - 1] = amzGenerateGuid();
+    rowOut[ci.DATE_ADDED - 1] = runTimestamp;
+    rowOut[ci.MONTH - 1] = month;
+    rowOut[ci.WEEK - 1] = week;
+    rowOut[ci.ACCOUNT - 1] = accountRow.ACCOUNT;
+    rowOut[ci.ACCOUNT_NUMBER - 1] = accountRow.ACCOUNT_NUMBER;
+    rowOut[ci.INSTITUTION - 1] = accountRow.INSTITUTION;
+    rowOut[ci.ACCOUNT_ID - 1] = accountRow.ACCOUNT_ID;
+    rowOut[ci.METADATA - 1] = metadataValue;
     output.push(rowOut);
   }
 
@@ -2306,21 +2397,21 @@ function importAmazonRecent(csvText, months, options) {
 
     const offDesc = amzFormatPurchaseOffsetLine_(isDigital, oidKey);
     const offset = new Array(numCols).fill("");
-    offset[tillerCols[tillerLabels.DATE] - 1] = orderDateForOffset;
     amzSetRowDescriptionFields_(offset, tillerCols, tillerLabels, offDesc, offDesc);
-    offset[tillerCols[tillerLabels.AMOUNT] - 1] = Math.abs(total);
-    offset[tillerCols[tillerLabels.TRANSACTION_ID] - 1] = amzGenerateGuid();
-    offset[tillerCols[tillerLabels.DATE_ADDED] - 1] = offsetNow;
-    offset[tillerCols[tillerLabels.MONTH] - 1] = offMonth;
-    offset[tillerCols[tillerLabels.WEEK] - 1] = offWeek;
-    offset[tillerCols[tillerLabels.ACCOUNT] - 1] = accountRow.ACCOUNT;
-    offset[tillerCols[tillerLabels.ACCOUNT_NUMBER] - 1] = accountRow.ACCOUNT_NUMBER;
-    offset[tillerCols[tillerLabels.INSTITUTION] - 1] = accountRow.INSTITUTION;
-    offset[tillerCols[tillerLabels.ACCOUNT_ID] - 1] = accountRow.ACCOUNT_ID;
+    offset[ci.DATE - 1] = orderDateForOffset;
+    offset[ci.AMOUNT - 1] = Math.abs(total);
+    offset[ci.TRANSACTION_ID - 1] = amzGenerateGuid();
+    offset[ci.DATE_ADDED - 1] = offsetNow;
+    offset[ci.MONTH - 1] = offMonth;
+    offset[ci.WEEK - 1] = offWeek;
+    offset[ci.ACCOUNT - 1] = accountRow.ACCOUNT;
+    offset[ci.ACCOUNT_NUMBER - 1] = accountRow.ACCOUNT_NUMBER;
+    offset[ci.INSTITUTION - 1] = accountRow.INSTITUTION;
+    offset[ci.ACCOUNT_ID - 1] = accountRow.ACCOUNT_ID;
     const offsetAmazonMeta = isDigital
       ? { id: String(oidKey), type: "digital-purchase-offset" }
       : { id: String(oidKey), type: "purchase-offset" };
-    offset[tillerCols[tillerLabels.METADATA] - 1] =
+    offset[ci.METADATA - 1] =
       "Imported by AmazonCSVImporter on " +
       importTimestampStr +
       " " +
@@ -2352,6 +2443,17 @@ function importAmazonRecent(csvText, months, options) {
     ", " + padded.length + " total, " + writeCols + " cols): " +
     ((tWriteEnd - tWriteStart) / 1000).toFixed(2) + " s"
   );
+
+  try {
+    const d = sheet.getRange(startRow, ci.DATE).getValues()[0][0];
+    const dLabel =
+      d instanceof Date
+        ? "Date isDate=" + !isNaN(d.getTime())
+        : "type=" + typeof d + (d != null ? " valLen=" + String(d).length : "");
+    timing.push("Server: post-write first row Date column — " + dLabel);
+  } catch (eRw) {
+    timing.push("Server: post-write readback Date: " + (eRw.message || String(eRw)));
+  }
 
   if (!deferPost) {
     const postLines = amzApplyTransactionsSortAndFilterCore_(
@@ -2428,15 +2530,11 @@ function importDigitalReturnsCsv(csvText, options, digitalOrdersCsv) {
   if (!sheet) return "Error: Sheet '" + sheetName + "' not found.";
 
   const tillerCols = amzGetTillerColumnMap(sheet);
-  if (!tillerCols[tillerLabels.DATE]) {
-    return (
-      "Error: Transactions sheet is missing a column whose header matches the AMZ Import Tiller labels for Date (expected \"" +
-      String(tillerLabels.DATE) +
-      "\")."
-    );
-  }
+  const colMapErrDr = amzValidateTransactionsImportColumns_(tillerCols, tillerLabels);
+  if (colMapErrDr) return colMapErrDr;
   const categoryColNum = offsetCategory
-    ? tillerCols["Category"] || tillerCols["Categories"] || null
+    ? amzGetTillerColumnIndex_(tillerCols, "Category") ||
+      amzGetTillerColumnIndex_(tillerCols, "Categories")
     : null;
 
   const csv = Utilities.parseCsv(csvText);
@@ -2488,6 +2586,7 @@ function importDigitalReturnsCsv(csvText, options, digitalOrdersCsv) {
   }
 
   const numCols = amzNumColsForImportRows(sheet, tillerCols, tillerLabels, categoryColNum);
+  const ciDr = amzWrittenTillerIndices_(tillerCols, tillerLabels);
   const colDebug = amzTransactionsColumnDebugLines(sheet, tillerCols, tillerLabels, numCols, categoryColNum);
   for (let di = 0; di < colDebug.length; di++) timing.push(colDebug[di]);
 
@@ -2569,18 +2668,18 @@ function importDigitalReturnsCsv(csvText, options, digitalOrdersCsv) {
     const month = Utilities.formatDate(orderDate, Session.getScriptTimeZone(), "yyyy-MM");
     const week = amzGetWeekStartDate(orderDate);
     const rowOut = new Array(numCols).fill("");
-    rowOut[tillerCols[tillerLabels.DATE] - 1] = orderDate;
     amzSetRowDescriptionFields_(rowOut, tillerCols, tillerLabels, AMZ_DESC_DIGITAL_REFUND, AMZ_DESC_DIGITAL_REFUND);
-    rowOut[tillerCols[tillerLabels.AMOUNT] - 1] = amount;
-    rowOut[tillerCols[tillerLabels.TRANSACTION_ID] - 1] = amzGenerateGuid();
-    rowOut[tillerCols[tillerLabels.DATE_ADDED] - 1] = runTimestamp;
-    rowOut[tillerCols[tillerLabels.MONTH] - 1] = month;
-    rowOut[tillerCols[tillerLabels.WEEK] - 1] = week;
-    rowOut[tillerCols[tillerLabels.ACCOUNT] - 1] = accountRow.ACCOUNT;
-    rowOut[tillerCols[tillerLabels.ACCOUNT_NUMBER] - 1] = accountRow.ACCOUNT_NUMBER;
-    rowOut[tillerCols[tillerLabels.INSTITUTION] - 1] = accountRow.INSTITUTION;
-    rowOut[tillerCols[tillerLabels.ACCOUNT_ID] - 1] = accountRow.ACCOUNT_ID;
-    rowOut[tillerCols[tillerLabels.METADATA] - 1] = metadataValue;
+    rowOut[ciDr.DATE - 1] = orderDate;
+    rowOut[ciDr.AMOUNT - 1] = amount;
+    rowOut[ciDr.TRANSACTION_ID - 1] = amzGenerateGuid();
+    rowOut[ciDr.DATE_ADDED - 1] = runTimestamp;
+    rowOut[ciDr.MONTH - 1] = month;
+    rowOut[ciDr.WEEK - 1] = week;
+    rowOut[ciDr.ACCOUNT - 1] = accountRow.ACCOUNT;
+    rowOut[ciDr.ACCOUNT_NUMBER - 1] = accountRow.ACCOUNT_NUMBER;
+    rowOut[ciDr.INSTITUTION - 1] = accountRow.INSTITUTION;
+    rowOut[ciDr.ACCOUNT_ID - 1] = accountRow.ACCOUNT_ID;
+    rowOut[ciDr.METADATA - 1] = metadataValue;
     output.push(rowOut);
     existingFullDescSet.add(dupKeyDigitalReturn);
 
@@ -2620,21 +2719,21 @@ function importDigitalReturnsCsv(csvText, options, digitalOrdersCsv) {
     const offMonth = Utilities.formatDate(orderDateForOffset, Session.getScriptTimeZone(), "yyyy-MM");
     const offWeek = amzGetWeekStartDate(orderDateForOffset);
     const offset = new Array(numCols).fill("");
-    offset[tillerCols[tillerLabels.DATE] - 1] = orderDateForOffset;
     const digRetOffDesc = amzFormatDigitalReturnOffsetLine_(oidKey);
     amzSetRowDescriptionFields_(offset, tillerCols, tillerLabels, digRetOffDesc, digRetOffDesc);
-    offset[tillerCols[tillerLabels.AMOUNT] - 1] = Math.abs(total);
-    offset[tillerCols[tillerLabels.TRANSACTION_ID] - 1] = amzGenerateGuid();
-    offset[tillerCols[tillerLabels.DATE_ADDED] - 1] = offsetNow;
-    offset[tillerCols[tillerLabels.MONTH] - 1] = offMonth;
-    offset[tillerCols[tillerLabels.WEEK] - 1] = offWeek;
+    offset[ciDr.DATE - 1] = orderDateForOffset;
+    offset[ciDr.AMOUNT - 1] = Math.abs(total);
+    offset[ciDr.TRANSACTION_ID - 1] = amzGenerateGuid();
+    offset[ciDr.DATE_ADDED - 1] = offsetNow;
+    offset[ciDr.MONTH - 1] = offMonth;
+    offset[ciDr.WEEK - 1] = offWeek;
     const offsetAcct = amzResolveDigitalReturnAccountRow(oidKey, paymentByOrder, paymentAccounts, config.digitalUserAccount);
-    offset[tillerCols[tillerLabels.ACCOUNT] - 1] = offsetAcct.ACCOUNT;
-    offset[tillerCols[tillerLabels.ACCOUNT_NUMBER] - 1] = offsetAcct.ACCOUNT_NUMBER;
-    offset[tillerCols[tillerLabels.INSTITUTION] - 1] = offsetAcct.INSTITUTION;
-    offset[tillerCols[tillerLabels.ACCOUNT_ID] - 1] = offsetAcct.ACCOUNT_ID;
+    offset[ciDr.ACCOUNT - 1] = offsetAcct.ACCOUNT;
+    offset[ciDr.ACCOUNT_NUMBER - 1] = offsetAcct.ACCOUNT_NUMBER;
+    offset[ciDr.INSTITUTION - 1] = offsetAcct.INSTITUTION;
+    offset[ciDr.ACCOUNT_ID - 1] = offsetAcct.ACCOUNT_ID;
     const digRetOffMeta = { id: String(oidKey), type: "digital-return-offset" };
-    offset[tillerCols[tillerLabels.METADATA] - 1] =
+    offset[ciDr.METADATA - 1] =
       "Imported by AmazonCSVImporter on " + importTimestampStr + " " + JSON.stringify({ amazon: digRetOffMeta });
     if (offsetCategory && categoryColNum) {
       offset[categoryColNum - 1] = offsetCategory;
@@ -2717,22 +2816,11 @@ function importRefundDetailsCsv(csvText, options, orderHistoryCsv) {
   if (!sheet) return "Error: Sheet '" + sheetName + "' not found.";
 
   const tillerCols = amzGetTillerColumnMap(sheet);
-  if (!tillerCols[tillerLabels.METADATA]) {
-    return (
-      "Error: Transactions sheet is missing a column whose header matches the AMZ Import Tiller labels for Metadata (expected \"" +
-      String(tillerLabels.METADATA) +
-      "\")."
-    );
-  }
-  if (!tillerCols[tillerLabels.DATE]) {
-    return (
-      "Error: Transactions sheet is missing a column whose header matches the AMZ Import Tiller labels for Date (expected \"" +
-      String(tillerLabels.DATE) +
-      "\")."
-    );
-  }
+  const colMapErrRd = amzValidateTransactionsImportColumns_(tillerCols, tillerLabels);
+  if (colMapErrRd) return colMapErrRd;
   const categoryColNum = offsetCategory
-    ? tillerCols["Category"] || tillerCols["Categories"] || null
+    ? amzGetTillerColumnIndex_(tillerCols, "Category") ||
+      amzGetTillerColumnIndex_(tillerCols, "Categories")
     : null;
 
   const csv = Utilities.parseCsv(csvText);
@@ -2795,6 +2883,7 @@ function importRefundDetailsCsv(csvText, options, orderHistoryCsv) {
   }
 
   const numCols = amzNumColsForImportRows(sheet, tillerCols, tillerLabels, categoryColNum);
+  const ciRd = amzWrittenTillerIndices_(tillerCols, tillerLabels);
   const colDebug = amzTransactionsColumnDebugLines(sheet, tillerCols, tillerLabels, numCols, categoryColNum);
   for (let di = 0; di < colDebug.length; di++) timing.push(colDebug[di]);
 
@@ -2892,7 +2981,6 @@ function importRefundDetailsCsv(csvText, options, orderHistoryCsv) {
     const month = Utilities.formatDate(orderDate, Session.getScriptTimeZone(), "yyyy-MM");
     const week = amzGetWeekStartDate(orderDate);
     const rowOut = new Array(numCols).fill("");
-    rowOut[tillerCols[tillerLabels.DATE] - 1] = orderDate;
     amzSetRowDescriptionFields_(
       rowOut,
       tillerCols,
@@ -2900,16 +2988,17 @@ function importRefundDetailsCsv(csvText, options, orderHistoryCsv) {
       amzFormatPhysicalRefundDescription_(),
       amzFormatPhysicalRefundFullDescription_(orderID)
     );
-    rowOut[tillerCols[tillerLabels.AMOUNT] - 1] = amount;
-    rowOut[tillerCols[tillerLabels.TRANSACTION_ID] - 1] = amzGenerateGuid();
-    rowOut[tillerCols[tillerLabels.DATE_ADDED] - 1] = runTimestamp;
-    rowOut[tillerCols[tillerLabels.MONTH] - 1] = month;
-    rowOut[tillerCols[tillerLabels.WEEK] - 1] = week;
-    rowOut[tillerCols[tillerLabels.ACCOUNT] - 1] = accountRow.ACCOUNT;
-    rowOut[tillerCols[tillerLabels.ACCOUNT_NUMBER] - 1] = accountRow.ACCOUNT_NUMBER;
-    rowOut[tillerCols[tillerLabels.INSTITUTION] - 1] = accountRow.INSTITUTION;
-    rowOut[tillerCols[tillerLabels.ACCOUNT_ID] - 1] = accountRow.ACCOUNT_ID;
-    rowOut[tillerCols[tillerLabels.METADATA] - 1] = metadataValue;
+    rowOut[ciRd.DATE - 1] = orderDate;
+    rowOut[ciRd.AMOUNT - 1] = amount;
+    rowOut[ciRd.TRANSACTION_ID - 1] = amzGenerateGuid();
+    rowOut[ciRd.DATE_ADDED - 1] = runTimestamp;
+    rowOut[ciRd.MONTH - 1] = month;
+    rowOut[ciRd.WEEK - 1] = week;
+    rowOut[ciRd.ACCOUNT - 1] = accountRow.ACCOUNT;
+    rowOut[ciRd.ACCOUNT_NUMBER - 1] = accountRow.ACCOUNT_NUMBER;
+    rowOut[ciRd.INSTITUTION - 1] = accountRow.INSTITUTION;
+    rowOut[ciRd.ACCOUNT_ID - 1] = accountRow.ACCOUNT_ID;
+    rowOut[ciRd.METADATA - 1] = metadataValue;
     output.push(rowOut);
     existingFullDescSet.add(dupKeyRefund);
 
@@ -2955,22 +3044,22 @@ function importRefundDetailsCsv(csvText, options, orderHistoryCsv) {
     const offMonth = Utilities.formatDate(orderDateForOffset, Session.getScriptTimeZone(), "yyyy-MM");
     const offWeek = amzGetWeekStartDate(orderDateForOffset);
     const offset = new Array(numCols).fill("");
-    offset[tillerCols[tillerLabels.DATE] - 1] = orderDateForOffset;
     const physRefOffDesc = amzFormatPhysicalRefundOffsetLine_(oidKey);
     amzSetRowDescriptionFields_(offset, tillerCols, tillerLabels, physRefOffDesc, physRefOffDesc);
-    offset[tillerCols[tillerLabels.AMOUNT] - 1] = -Math.abs(total);
-    offset[tillerCols[tillerLabels.TRANSACTION_ID] - 1] = amzGenerateGuid();
-    offset[tillerCols[tillerLabels.DATE_ADDED] - 1] = offsetNow;
-    offset[tillerCols[tillerLabels.MONTH] - 1] = offMonth;
-    offset[tillerCols[tillerLabels.WEEK] - 1] = offWeek;
+    offset[ciRd.DATE - 1] = orderDateForOffset;
+    offset[ciRd.AMOUNT - 1] = -Math.abs(total);
+    offset[ciRd.TRANSACTION_ID - 1] = amzGenerateGuid();
+    offset[ciRd.DATE_ADDED - 1] = offsetNow;
+    offset[ciRd.MONTH - 1] = offMonth;
+    offset[ciRd.WEEK - 1] = offWeek;
     const payHint = paymentByOrder[oidKey] != null ? String(paymentByOrder[oidKey]).trim() : "";
     const acct = amzResolvePhysicalRefundAccountRow(payHint, paymentAccounts);
-    offset[tillerCols[tillerLabels.ACCOUNT] - 1] = acct.ACCOUNT;
-    offset[tillerCols[tillerLabels.ACCOUNT_NUMBER] - 1] = acct.ACCOUNT_NUMBER;
-    offset[tillerCols[tillerLabels.INSTITUTION] - 1] = acct.INSTITUTION;
-    offset[tillerCols[tillerLabels.ACCOUNT_ID] - 1] = acct.ACCOUNT_ID;
+    offset[ciRd.ACCOUNT - 1] = acct.ACCOUNT;
+    offset[ciRd.ACCOUNT_NUMBER - 1] = acct.ACCOUNT_NUMBER;
+    offset[ciRd.INSTITUTION - 1] = acct.INSTITUTION;
+    offset[ciRd.ACCOUNT_ID - 1] = acct.ACCOUNT_ID;
     const physRefOffMeta = { id: String(oidKey), type: "physical-refund-offset" };
-    offset[tillerCols[tillerLabels.METADATA] - 1] =
+    offset[ciRd.METADATA - 1] =
       "Imported by AmazonCSVImporter on " + importTimestampStr + " " + JSON.stringify({ amazon: physRefOffMeta });
     if (offsetCategory && categoryColNum) {
       offset[categoryColNum - 1] = offsetCategory;
@@ -3057,7 +3146,7 @@ function amzImportBundleTransactionsPostLog_(bundleImportTimestampIso) {
     return "\n\n=== Transactions sheet ===\nError: Sheet '" + sheetName + "' not found.";
   }
   const tillerCols = amzGetTillerColumnMap(sheet);
-  if (!tillerCols[tillerLabels.DATE]) {
+  if (amzGetTillerColumnIndex_(tillerCols, tillerLabels.DATE) == null) {
     return "\n\n=== Transactions sheet ===\nError: Transactions sheet is missing Date column.";
   }
   const postLines = amzApplyTransactionsSortAndFilterCore_(

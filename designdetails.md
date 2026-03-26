@@ -16,6 +16,7 @@ This document explains how the **ZIP sidebar** (`AmazonOrdersSidebar.html`) and 
 | [8](#8-metadata-fields-how-csv-values-become-amazon-json) | Building the `amazon` object in Metadata |
 | [9](#9-sort-order-and-metadata-filter-why-this-approach) | Sort + filter after import |
 | [10](#10-error-handling-and-missing-values-especially-refund-dates) | Skips, stops, and refund dates |
+| [11](#11-troubleshooting-blank-date--date-added--week) | Blank Date / Date Added / Week on import |
 
 ---
 
@@ -201,6 +202,16 @@ Missing **required** mappings fail fast during validation. Bad or empty **dates*
 3. If still `null`, row is skipped as invalid refund date (`importRefundDetailsCsv`); counted in **`skippedInvalidRefundDate`**.
 
 Strings like **“Not Applicable”** fail `Date` parse → `null` → falls through to **Creation Date** when present; if both fail, row is skipped (not dated to “today”).
+
+---
+
+## 11. Troubleshooting: blank Date / Date Added / Week
+
+Imports resolve **Transactions** columns with **`amzGetTillerColumnIndex_`**: exact header match to the AMZ Import **Tiller label**, then **case-insensitive** fallback. **`amzValidateTransactionsImportColumns_`** fails the run early if any required written field (Date, Date Added, Month, Week, Description, etc.) does not map to a header—a missing **“Date Added”** or **“Week”** header that only differs by casing from the label used to resolve **Month** is a common cause of **Month filled but date cells empty** (values were assigned to a non-dense array index and never reached `setValues`).
+
+The import log includes **`Server: Transactions columns —`** with indices for Date, Date Added, Month, Week, Description, Full Description, Amount, and **`WARNING: duplicate column indices`** when two logical fields share one column (descriptions overwriting the Date column is a typical pattern). **`Server: post-write first row Date column`** confirms what the grid stored immediately after the write for `importAmazonRecent`.
+
+If one pipeline (e.g. Order History) looks wrong and another (digital or refund) looks right on the same sheet, compare **Metadata** types and use the log lines above; headers and duplicates are shared across pipelines in the same run.
 
 ---
 
