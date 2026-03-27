@@ -8,10 +8,22 @@
 
 const AMZ_IMPORT_SHEET_NAME = "AMZ Import";
 
+/**
+ * Sidebar "Category for offsets" `<select>` first option value (must match AmazonOrdersSidebar.html).
+ * Empty string is reserved for explicit "Uncategorized"; this sentinel means the user did not choose yet.
+ */
+const AMZ_OFFSET_CATEGORY_SELECT_VALUE = "__AMZ_OFFSET_SELECT__";
+
 /** Header that identifies a Digital Content Orders CSV (takes precedence if both markers exist). */
 const AMZ_DIGITAL_MARKER_HEADER = "Digital Order Item ID";
 /** Header that identifies a standard Order History CSV. */
 const AMZ_STANDARD_MARKER_HEADER = "Carrier Name & Tracking Number";
+
+/**
+ * Default Tiller **Transactions** header for the Date Added column; seeds AMZ Import TABLE4 and matches bundled templates (often column P).
+ * Change the cell on AMZ Import if your sheet uses a different header text.
+ */
+const AMZ_DEFAULT_TILLER_LABEL_DATE_ADDED = "Date Added";
 
 /** Legacy reference (unused); Transactions column names live on AMZ Import Tiller labels. */
 const AMZ_TILLER_CONFIG = {
@@ -22,7 +34,7 @@ const AMZ_TILLER_CONFIG = {
     AMOUNT: "Amount",
     TRANSACTION_ID: "Transaction ID",
     FULL_DESCRIPTION: "Full Description",
-    DATE_ADDED: "Date Added",
+    DATE_ADDED: AMZ_DEFAULT_TILLER_LABEL_DATE_ADDED,
     MONTH: "Month",
     WEEK: "Week",
     ACCOUNT: "Account",
@@ -57,7 +69,7 @@ const AMZ_IMPORT_DEFAULTS = {
     ["AMOUNT", "Amount"],
     ["TRANSACTION_ID", "Transaction ID"],
     ["FULL_DESCRIPTION", "Full Description"],
-    ["DATE_ADDED", "Date Added"],
+    ["DATE_ADDED", AMZ_DEFAULT_TILLER_LABEL_DATE_ADDED],
     ["MONTH", "Month"],
     ["WEEK", "Week"],
     ["ACCOUNT", "Account"],
@@ -320,9 +332,12 @@ function amzFormatPurchaseFullDescription_(isDigital, orderId, productName, asin
 }
 
 /** Purchase balancing offset row (same string for Description and Full Description). */
-function amzFormatPurchaseOffsetLine_(isDigital, orderId) {
+function amzFormatPurchaseOffsetLine_(isDigital, orderId, itemCount) {
   const oid = String(orderId == null ? "" : orderId).trim();
-  return amzPurchaseLinePrefix_(isDigital) + "Purchase offset Order ID " + oid;
+  let line = amzPurchaseLinePrefix_(isDigital) + "Purchase offset Order ID " + oid;
+  const n = itemCount == null ? NaN : Number(itemCount);
+  if (!isNaN(n) && n >= 1) line += n === 1 ? " (1 item)" : " (" + n + " items)";
+  return line;
 }
 
 /** Digital returns balancing offset (same string for Description and Full Description). */
@@ -510,6 +525,32 @@ function amzResolveRefundDetailsOrderDate_(r, col, config) {
     if (fromCreation) return fromCreation;
   }
   return null;
+}
+
+/**
+ * Sum Refund Amount for one Order ID after dropping duplicate CSV lines that repeat the same
+ * refund event (same amount and resolved Refund/Creation date — Amazon often repeats rows e.g. by Quantity).
+ * @param {Array<Array>} rows - CSV rows for one order
+ * @param {Object<string, number>} col - header → index
+ * @param {string} refundAmountCol - header name for refund amount
+ * @param {*} config - readAmzImportConfig
+ * @returns {number}
+ */
+function amzDedupedRefundSumForOrder_(rows, col, refundAmountCol, config) {
+  const seen = Object.create(null);
+  let sum = 0;
+  for (let j = 0; j < rows.length; j++) {
+    const v = parseFloat(rows[j][col[refundAmountCol]]);
+    if (isNaN(v)) continue;
+    const d = amzResolveRefundDetailsOrderDate_(rows[j], col, config);
+    const amtKey = Number(v).toFixed(2);
+    const datePart = d && !isNaN(d.getTime()) ? String(d.getTime()) : "nodate:" + j;
+    const key = amtKey + "|" + datePart;
+    if (seen[key]) continue;
+    seen[key] = 1;
+    sum += v;
+  }
+  return sum;
 }
 
 /** Max full skipped CSV rows to echo into the import log (status panel). */
@@ -872,14 +913,17 @@ function amzPaymentTypeHasRow(paymentAccounts, paymentTypeFromCsv) {
 }
 
 /**
- * ZIP / sidebar imports require a real category name for offset rows; empty means the user left the
- * "-- Select Value --" placeholder.
+ * ZIP / sidebar: offset category may be a real name or "" (Uncategorized — no Category on offset rows).
+ * Rejects only {@link AMZ_OFFSET_CATEGORY_SELECT_VALUE} ("-- Select Value --") and missing payload field.
  * @param {*} offsetCategoryRaw - {@code payload.offsetCategory} / bundle field
  * @returns {string|null} error message, or null if ok
  */
 function amzValidateBundleOffsetCategory_(offsetCategoryRaw) {
-  const s = offsetCategoryRaw != null ? String(offsetCategoryRaw).trim() : "";
-  if (!s) {
+  if (offsetCategoryRaw == null) {
+    return 'Select a Category for offsets from the dropdown ("-- Select Value --" is not valid).';
+  }
+  const s = String(offsetCategoryRaw).trim();
+  if (s === AMZ_OFFSET_CATEGORY_SELECT_VALUE) {
     return 'Select a Category for offsets from the dropdown ("-- Select Value --" is not valid).';
   }
   return null;
@@ -1121,20 +1165,64 @@ function amzGetWeekStartDate(date) {
 }
 
 /**
+ * Active spreadsheet timezone, or script TZ if no spreadsheet (e.g. rare edge cases).
+ * Date Added must match **{@link Spreadsheet#getSpreadsheetTimeZone}**, not only {@link Session#getScriptTimeZone},
+ * or calendar day / serial will be wrong when those differ.
+ * @returns {string}
+ */
+function amzActiveSpreadsheetTimeZoneOrDefault_() {
+  try {
+    return SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
+  } catch (e) {
+    return Session.getScriptTimeZone();
+  }
+}
+
+/**
+ * Calendar date at local midnight for instant {@code d} in timezone {@code tz} (not the transaction “order” date).
+ * @param {Date} d
+ * @param {string} tz - e.g. {@link Spreadsheet#getSpreadsheetTimeZone}
+ * @returns {Date}
+ */
+function amzCalendarDateInTimeZone_(d, tz) {
+  if (!(d instanceof Date) || isNaN(d.getTime())) return new Date(NaN);
+  const y = Number(Utilities.formatDate(d, tz, "yyyy"));
+  const mo = Number(Utilities.formatDate(d, tz, "M"));
+  const da = Number(Utilities.formatDate(d, tz, "d"));
+  const out = new Date(y, mo - 1, da);
+  out.setHours(0, 0, 0, 0);
+  return out;
+}
+
+/** Date Added column: **today’s** calendar date in the **spreadsheet** timezone when the import runs (not {@code bundleImportTimestampIso}). */
+function amzDateAddedForImportRun_() {
+  return amzCalendarDateInTimeZone_(new Date(), amzActiveSpreadsheetTimeZoneOrDefault_());
+}
+
+/**
  * Google Sheets / Excel serial date (days since 1899-12-30) for local calendar Y/M/D in {@link Session#getScriptTimeZone}.
  *
  * Why not pass JS Date into {@code Range#setValues}? On some Transactions sheets the Date and Week columns are
  * formatted or treated such that {@code setValues} with a Date leaves the cell empty on readback, while Amount
  * (number) and Month ({@code Utilities.formatDate} string) still write. Serial numbers persist and display as
  * dates when the column format allows; {@code amzCoercePaddedRowsDateWeekToSerial_} runs immediately before each
- * transaction-batch {@code setValues}.
+ * transaction-batch {@code setValues} (also coerces **Date Added** when present in {@code ci}).
  *
  * @param {Date} d
  * @returns {number|string} serial, or "" if invalid
  */
 function amzSheetsDateSerial_(d) {
+  return amzSheetsDateSerialInTimeZone_(d, Session.getScriptTimeZone());
+}
+
+/**
+ * Like {@link amzSheetsDateSerial_} but calendar Y/M/D for {@code d} are taken in {@code tz} (match spreadsheet display).
+ * @param {Date} d
+ * @param {string} tz
+ * @returns {number|string}
+ */
+function amzSheetsDateSerialInTimeZone_(d, tz) {
   if (!(d instanceof Date) || isNaN(d.getTime())) return "";
-  const tz = Session.getScriptTimeZone();
   const y = Number(Utilities.formatDate(d, tz, "yyyy"));
   const mo = Number(Utilities.formatDate(d, tz, "M"));
   const da = Number(Utilities.formatDate(d, tz, "d"));
@@ -1146,20 +1234,24 @@ function amzSheetsDateSerial_(d) {
 }
 
 /**
- * Replaces Date instances at the Date and Week column indices with {@link amzSheetsDateSerial_} values in-place,
- * so import batches survive sheets where native Date values would otherwise store as blank (see {@code amzSheetsDateSerial_}).
+ * Replaces Date instances at the Date, Week, and (when mapped) Date Added column indices with {@link amzSheetsDateSerial_}
+ * values in-place, so import batches survive sheets where native Date values would otherwise store as blank (see {@code amzSheetsDateSerial_}).
  * @param {Array<Array<*>>} padded
- * @param {Object} ci - {@link amzWrittenTillerIndices_} (DATE, WEEK 1-based)
+ * @param {Object} ci - {@link amzWrittenTillerIndices_} (DATE, WEEK 1-based; DATE_ADDED optional)
  */
 function amzCoercePaddedRowsDateWeekToSerial_(padded, ci) {
   if (!padded || !ci || typeof ci.DATE !== "number" || typeof ci.WEEK !== "number") return;
   const di = ci.DATE - 1;
   const wi = ci.WEEK - 1;
+  const ai = typeof ci.DATE_ADDED === "number" ? ci.DATE_ADDED - 1 : -1;
+  const addedTz = amzActiveSpreadsheetTimeZoneOrDefault_();
   for (let r = 0; r < padded.length; r++) {
     const row = padded[r];
     if (!row) continue;
     if (row[di] instanceof Date && !isNaN(row[di].getTime())) row[di] = amzSheetsDateSerial_(row[di]);
     if (row[wi] instanceof Date && !isNaN(row[wi].getTime())) row[wi] = amzSheetsDateSerial_(row[wi]);
+    if (ai >= 0 && row[ai] instanceof Date && !isNaN(row[ai].getTime()))
+      row[ai] = amzSheetsDateSerialInTimeZone_(row[ai], addedTz);
   }
 }
 
@@ -1684,6 +1776,25 @@ function amzAddDuplicateKeysFromImportMetadataCell_(metaCellValue, setObj) {
   const amz = parsed && parsed.amazon;
   if (!amz) return;
   amzAddDedupKeysForAmazonMeta_(amz, setObj);
+}
+
+/**
+ * True if {@code existingSet} has any {@code legacy-return|<orderId>|…} key from Metadata or Full Description scan.
+ * Refund Details import uses this so legacy return credits still dedupe when the sheet amount is wrong (legacy
+ * summed duplicate CSV rows) and {@code refund-detail|orderId|amount} would not match the deduped CSV total.
+ * @param {Set<string>} existingSet
+ * @param {*} orderIdRaw
+ * @returns {boolean}
+ */
+function amzAnyLegacyReturnKeyForOrderId_(existingSet, orderIdRaw) {
+  const oid = String(orderIdRaw == null ? "" : orderIdRaw).trim();
+  if (!oid) return false;
+  const p = "legacy-return|" + oid + "|";
+  let found = false;
+  existingSet.forEach(function (k) {
+    if (!found && k.indexOf(p) === 0) found = true;
+  });
+  return found;
 }
 
 /**
@@ -2309,7 +2420,7 @@ function importAmazonRecent(csvText, months, options) {
   }
 
   const output = [];
-  /** Per Order ID: { totalAmount (negative sum), orderDate, payKey } for offset rows (one offset per order). */
+  /** Per Order ID: { totalAmount (negative sum), orderDate, payKey, lineItemCount } for offset rows (one offset per order). */
   const perOrderOffset = {};
   let duplicateCount = 0;
   const skippedRowDump = { n: 0 };
@@ -2319,6 +2430,7 @@ function importAmazonRecent(csvText, months, options) {
     importTimestampStr = String(opts.bundleImportTimestampIso).trim();
     runTimestamp = amzParseImportTimestampToDate(importTimestampStr);
   }
+  const dateAddedCalendar = amzDateAddedForImportRun_();
 
   const tLoopStart = Date.now();
   const csvDataRowCount = csv.length - 1;
@@ -2363,7 +2475,7 @@ function importAmazonRecent(csvText, months, options) {
     rowOut[ci.DATE - 1] = orderDate;
     rowOut[ci.AMOUNT - 1] = amount;
     rowOut[ci.TRANSACTION_ID - 1] = amzGenerateGuid();
-    rowOut[ci.DATE_ADDED - 1] = runTimestamp;
+    rowOut[ci.DATE_ADDED - 1] = dateAddedCalendar;
     rowOut[ci.MONTH - 1] = month;
     rowOut[ci.WEEK - 1] = week;
     rowOut[ci.ACCOUNT - 1] = accountRow.ACCOUNT;
@@ -2435,10 +2547,12 @@ function importAmazonRecent(csvText, months, options) {
         perOrderOffset[oidKey] = {
           totalAmount: 0,
           orderDate: new Date(orderDate.getTime()),
-          payKey: payKey
+          payKey: payKey,
+          lineItemCount: 0
         };
       }
       perOrderOffset[oidKey].totalAmount += amount;
+      perOrderOffset[oidKey].lineItemCount = rows.length;
 
       pushOneRow(r, rows, orderDate, orderID, productName, asin, amount, accountRow, payKey);
       existingFullDescSet.add(dupKeyPurchase);
@@ -2498,12 +2612,14 @@ function importAmazonRecent(csvText, months, options) {
         perOrderOffset[oidKey] = {
           totalAmount: 0,
           orderDate: new Date(orderDate.getTime()),
-          payKey: paymentMethodType
+          payKey: paymentMethodType,
+          lineItemCount: 0
         };
       } else if (perOrderOffset[oidKey].payKey !== paymentMethodType) {
         // Unusual: same Order ID, different payment strings — keep first row's payment for account routing
       }
       perOrderOffset[oidKey].totalAmount += amount;
+      perOrderOffset[oidKey].lineItemCount += 1;
 
       pushOneRow(r, null, orderDate, orderID, productName, asin, amount, accountRow, payKey);
       existingFullDescSet.add(dupKeyPurchase);
@@ -2527,9 +2643,8 @@ function importAmazonRecent(csvText, months, options) {
     return detectedLabel + "\n" + msg + (timing.length ? "\n" + timing.join("\n") : "");
   }
 
-  // One balancing offset per Order ID; Date/Month/Week = that order's date. Date Added = import run time.
+  // One balancing offset per Order ID; Date/Month/Week = that order's date. Date Added = calendar date when import runs.
   const offsetRows = [];
-  const offsetNow = runTimestamp;
 
   const orderIdsForOffset = Object.keys(perOrderOffset);
   let offsetSkippedZeroNet = 0;
@@ -2555,13 +2670,15 @@ function importAmazonRecent(csvText, months, options) {
     const offMonth = Utilities.formatDate(orderDateForOffset, Session.getScriptTimeZone(), "yyyy-MM");
     const offWeek = amzGetWeekStartDate(orderDateForOffset);
 
-    const offDesc = amzFormatPurchaseOffsetLine_(isDigital, oidKey);
+    const itemCountForOffset =
+      po.lineItemCount != null && Number(po.lineItemCount) >= 1 ? Number(po.lineItemCount) : 1;
+    const offDesc = amzFormatPurchaseOffsetLine_(isDigital, oidKey, itemCountForOffset);
     const offset = new Array(numCols).fill("");
     amzSetRowDescriptionFields_(offset, tillerCols, tillerLabels, offDesc, offDesc);
     offset[ci.DATE - 1] = orderDateForOffset;
     offset[ci.AMOUNT - 1] = Math.abs(total);
     offset[ci.TRANSACTION_ID - 1] = amzGenerateGuid();
-    offset[ci.DATE_ADDED - 1] = offsetNow;
+    offset[ci.DATE_ADDED - 1] = dateAddedCalendar;
     offset[ci.MONTH - 1] = offMonth;
     offset[ci.WEEK - 1] = offWeek;
     offset[ci.ACCOUNT - 1] = accountRow.ACCOUNT;
@@ -2569,8 +2686,8 @@ function importAmazonRecent(csvText, months, options) {
     offset[ci.INSTITUTION - 1] = accountRow.INSTITUTION;
     offset[ci.ACCOUNT_ID - 1] = accountRow.ACCOUNT_ID;
     const offsetAmazonMeta = isDigital
-      ? { id: String(oidKey), type: "digital-purchase-offset" }
-      : { id: String(oidKey), type: "purchase-offset" };
+      ? { id: String(oidKey), type: "digital-purchase-offset", lineItemCount: itemCountForOffset }
+      : { id: String(oidKey), type: "purchase-offset", lineItemCount: itemCountForOffset };
     offset[ci.METADATA - 1] =
       "Imported by AmazonCSVImporter on " +
       importTimestampStr +
@@ -2777,6 +2894,7 @@ function importDigitalReturnsCsv(csvText, options, digitalOrdersCsv) {
     importTimestampStr = String(opts.bundleImportTimestampIso).trim();
     runTimestamp = amzParseImportTimestampToDate(importTimestampStr);
   }
+  const dateAddedCalendar = amzDateAddedForImportRun_();
   let duplicateCount = 0;
   const payKey = "Digital";
 
@@ -2837,7 +2955,7 @@ function importDigitalReturnsCsv(csvText, options, digitalOrdersCsv) {
     rowOut[ciDr.DATE - 1] = orderDate;
     rowOut[ciDr.AMOUNT - 1] = amount;
     rowOut[ciDr.TRANSACTION_ID - 1] = amzGenerateGuid();
-    rowOut[ciDr.DATE_ADDED - 1] = runTimestamp;
+    rowOut[ciDr.DATE_ADDED - 1] = dateAddedCalendar;
     rowOut[ciDr.MONTH - 1] = month;
     rowOut[ciDr.WEEK - 1] = week;
     rowOut[ciDr.ACCOUNT - 1] = accountRow.ACCOUNT;
@@ -2872,7 +2990,6 @@ function importDigitalReturnsCsv(csvText, options, digitalOrdersCsv) {
   }
 
   const offsetRows = [];
-  const offsetNow = runTimestamp;
   const orderIdsForOffset = Object.keys(perOrderOffset);
   for (let oi = 0; oi < orderIdsForOffset.length; oi++) {
     const oidKey = orderIdsForOffset[oi];
@@ -2889,7 +3006,7 @@ function importDigitalReturnsCsv(csvText, options, digitalOrdersCsv) {
     offset[ciDr.DATE - 1] = orderDateForOffset;
     offset[ciDr.AMOUNT - 1] = Math.abs(total);
     offset[ciDr.TRANSACTION_ID - 1] = amzGenerateGuid();
-    offset[ciDr.DATE_ADDED - 1] = offsetNow;
+    offset[ciDr.DATE_ADDED - 1] = dateAddedCalendar;
     offset[ciDr.MONTH - 1] = offMonth;
     offset[ciDr.WEEK - 1] = offWeek;
     const offsetAcct = amzResolveDigitalReturnAccountRow(oidKey, paymentByOrder, paymentAccounts, config.digitalUserAccount);
@@ -2950,6 +3067,7 @@ function importDigitalReturnsCsv(csvText, options, digitalOrdersCsv) {
 /**
  * Refund Details.csv (Order History refunds): Order ID, Refund Amount, Website;
  * Refund Date and/or Creation Date (date from Refund Date when parseable, else Creation Date).
+ * Per–Order ID refund totals dedupe CSV lines that repeat the same amount and date (see amzDedupedRefundSumForOrder_).
  * Website is stored in metadata / full description only — not filtered by Orders vs Whole Foods toggles.
  * When Order History.csv is available in the same bundle, join by Order ID to resolve payment method; else account fields are left blank for manual fix.
  * @param {string} orderHistoryCsv - Optional raw Order History CSV from ZIP (for payment join)
@@ -3091,6 +3209,7 @@ function importRefundDetailsCsv(csvText, options, orderHistoryCsv) {
     importTimestampStr = String(opts.bundleImportTimestampIso).trim();
     runTimestamp = amzParseImportTimestampToDate(importTimestampStr);
   }
+  const dateAddedCalendar = amzDateAddedForImportRun_();
   let duplicateCount = 0;
   let skippedInvalidRefundDate = 0;
 
@@ -3098,11 +3217,7 @@ function importRefundDetailsCsv(csvText, options, orderHistoryCsv) {
   for (let g = 0; g < orderIds.length; g++) {
     const rows = groups[orderIds[g]];
     const r = rows[0];
-    let sumRefund = 0;
-    for (let j = 0; j < rows.length; j++) {
-      const v = parseFloat(rows[j][col[refundAmountCol]]);
-      if (!isNaN(v)) sumRefund += v;
-    }
+    const sumRefund = amzDedupedRefundSumForOrder_(rows, col, refundAmountCol, config);
     const amount = sumRefund;
 
     const orderDate = amzResolveRefundDetailsOrderDate_(r, col, config);
@@ -3132,6 +3247,10 @@ function importRefundDetailsCsv(csvText, options, orderHistoryCsv) {
     const dupKeyRefund =
       "refund-detail|" + oidStr + "|" + Number(sumRefund).toFixed(2);
     if (existingFullDescSet.has(dupKeyRefund)) {
+      duplicateCount += 1;
+      continue;
+    }
+    if (amzAnyLegacyReturnKeyForOrderId_(existingFullDescSet, oidStr)) {
       duplicateCount += 1;
       continue;
     }
@@ -3173,7 +3292,7 @@ function importRefundDetailsCsv(csvText, options, orderHistoryCsv) {
     rowOut[ciRd.DATE - 1] = orderDate;
     rowOut[ciRd.AMOUNT - 1] = amount;
     rowOut[ciRd.TRANSACTION_ID - 1] = amzGenerateGuid();
-    rowOut[ciRd.DATE_ADDED - 1] = runTimestamp;
+    rowOut[ciRd.DATE_ADDED - 1] = dateAddedCalendar;
     rowOut[ciRd.MONTH - 1] = month;
     rowOut[ciRd.WEEK - 1] = week;
     rowOut[ciRd.ACCOUNT - 1] = accountRow.ACCOUNT;
@@ -3223,7 +3342,6 @@ function importRefundDetailsCsv(csvText, options, orderHistoryCsv) {
   }
 
   const offsetRows = [];
-  const offsetNow = runTimestamp;
   const orderIdsForOffset = Object.keys(perOrderOffset);
   for (let oi = 0; oi < orderIdsForOffset.length; oi++) {
     const oidKey = orderIdsForOffset[oi];
@@ -3240,7 +3358,7 @@ function importRefundDetailsCsv(csvText, options, orderHistoryCsv) {
     offset[ciRd.DATE - 1] = orderDateForOffset;
     offset[ciRd.AMOUNT - 1] = -Math.abs(total);
     offset[ciRd.TRANSACTION_ID - 1] = amzGenerateGuid();
-    offset[ciRd.DATE_ADDED - 1] = offsetNow;
+    offset[ciRd.DATE_ADDED - 1] = dateAddedCalendar;
     offset[ciRd.MONTH - 1] = offMonth;
     offset[ciRd.WEEK - 1] = offWeek;
     const payHint = paymentByOrder[oidKey] != null ? String(paymentByOrder[oidKey]).trim() : "";

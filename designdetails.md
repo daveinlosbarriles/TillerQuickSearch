@@ -18,6 +18,7 @@ This document explains how the **ZIP sidebar** (`AmazonOrdersSidebar.html`) and 
 | [10](#10-error-handling-and-missing-values-especially-refund-dates) | Skips, stops, and refund dates |
 | [11](#11-amazon-data-export-csv-reference-verified-columns) | Amazon export CSV columns (reference) |
 | [12](#12-troubleshooting-blank-date--date-added--week) | Blank Date / Date Added / Week on import |
+| [13](#13-issues-with-refund-detailscsv) | Issues with Refund Details.csv (duplicate rows) |
 
 ---
 
@@ -74,7 +75,9 @@ Configuration is read by `readAmzImportConfig` and validated by `validateAmzImpo
 | **Payment → account** | Table: Payment Type, Account, …, Use for Digital | Map Amazon payment **string** to Tiller account fields; exactly one **Yes** for digital | Orders (standard), offsets, `analyzePaymentMethodsForOrderHistory`; digital user row for digital **orders** |
 | **CSV column map** | `Source file` \| `Header` \| `Name in code` \| `Metadata field name` | Maps Amazon file/column → logical field + metadata JSON keys; `_file_detection` rows set **standard vs digital** marker headers | All imports; `amzDetectAmazonCsvFileType`; `amzGetCoreCsvColumn`; `amzGetSourceMapHeader` for refunds/returns |
 | **Tiller column labels** | Name in Code → Tiller label | Resolves **Transactions** column headers (sheet name, Date, Metadata, …) | All writers + dedup scan + sort/filter |
-| **In-code only** | — | e.g. `AMZ_WHOLE_FOODS_WEBSITE` (`panda01`), description prefixes | Website filter on Order History; labels |
+| **In-code only** | — | e.g. `AMZ_DEFAULT_TILLER_LABEL_DATE_ADDED` (default `"Date Added"`; often column **P** in Tiller’s template—position is **not** hard-coded), `AMZ_WHOLE_FOODS_WEBSITE` (`panda01`), description prefixes | Date Added header seed + imports; website filter |
+
+**Date Added on imported rows:** Every pipeline sets **Date Added** to the **calendar date the import runs** in the **spreadsheet timezone** (`Spreadsheet.getSpreadsheetTimeZone()`), via `amzDateAddedForImportRun_` / `amzActiveSpreadsheetTimeZoneOrDefault_` — not the Apps Script project timezone alone (they can differ and cause the wrong day or offset). It is not the Amazon order/refund date and not the `bundleImportTimestampIso` clock used in Metadata. The column is located by the **DATE_ADDED** row in TABLE4 (same as other Tiller labels). Batch `setValues` coerces Date Added to a sheet **serial** using that same spreadsheet timezone (`amzSheetsDateSerialInTimeZone_`); Date and Week still use `Session.getScriptTimeZone()` in `amzSheetsDateSerial_`.
 
 ---
 
@@ -334,6 +337,20 @@ Imports resolve **Transactions** columns with **`amzGetTillerColumnIndex_`**: ex
 The import log includes **`Server: Transactions columns —`** with indices for Date, Date Added, Month, Week, Description, Full Description, Amount, and **`WARNING: duplicate column indices`** when two logical fields share one column (descriptions overwriting the Date column is a typical pattern). **`Server: post-write first row Date column`** confirms what the grid stored immediately after the write for `importAmazonRecent`.
 
 If one pipeline (e.g. Order History) looks wrong and another (digital or refund) looks right on the same sheet, compare **Metadata** types and use the log lines above; headers and duplicates are shared across pipelines in the same run.
+
+---
+
+## 13. Issues with Refund Details.csv
+
+Amazon sometimes emits **several CSV rows for the same refund event**—for example the same **Order ID**, **Refund Amount**, and **Refund Date** (and often the same values in other columns), with **Quantity** or other fields varying line-by-line. Those lines are **not** separate cash movements; they are duplicate representations of one refund.
+
+**Problem (old behavior):** `importRefundDetailsCsv` grouped rows by **Order ID** and **summed every row’s Refund Amount**. That **double-counted** (or N-counted) the same refund when Amazon repeated it, so imported totals and offset lines were too large.
+
+**Solution:** Before aggregating per order, the importer uses **`amzDedupedRefundSumForOrder_`** in `amazonorders.gs`. For each row in the group it parses the refund amount (skips non-numeric) and resolves the row’s date with **`amzResolveRefundDetailsOrderDate_`** (Refund Date, then Creation Date). Rows that share the **same normalized amount** (`Number` rounded with `toFixed(2)` for the key) **and** the **same resolved timestamp** (`getTime()`) contribute only **once** to the total. If a row has an amount but no parsable date, the dedupe key falls back to a per-row suffix so unrelated lines are not merged arbitrarily.
+
+**What this preserves:** Multiple **distinct** refunds on the same order—different amounts and/or different resolved dates—still sum correctly (each unique `(amount, date)` pair counts once).
+
+**Related:** Order-level refund transaction, dedup key `refund-detail|orderId|amount`, and **`physical-refund-offset`** all use this **deduped** total (§4, §6).
 
 ---
 

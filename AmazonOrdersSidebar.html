@@ -197,13 +197,16 @@
       <div class="main-col">
         <div class="inline-field-line">
           <label for="offsetCat">Category for offsets</label>
-          <select id="offsetCat"><option value="">-- Select Value --</option></select>
+          <select id="offsetCat">
+            <option value="__AMZ_OFFSET_SELECT__">-- Select Value --</option>
+            <option value="">— Uncategorized —</option>
+          </select>
         </div>
       </div>
       <button type="button" class="help-toggle help-toggle-nudge-category" aria-label="Help" data-help="helpCat">?</button>
     </div>
     <div id="helpCat" class="help-panel">
-      <p>You must choose a category (not “-- Select Value --”). Suggest creating a category “Amazon”, and assign all offsets to that category. Then excluding that category from reporting.</p>
+      <p>Choose “— Uncategorized —” (no category on offset rows) or a real category—not “-- Select Value --”. Suggest creating a category “Amazon”, and assign all offsets to that category. Then excluding that category from reporting.</p>
       <p>Also, all of your credit card transactions on Amazon orders should also be set to “Amazon.” This way, they cancel each other out, are both excluded from reporting, and you are only reporting on the specific items you bought, and the categories you assigned to them.</p>
       <p>Note that we have to create offsets when importing your spending, to avoid counting that spending twice – first with your credit card transaction, and then again with the Amazon imported transaction.</p>
     </div>
@@ -213,7 +216,7 @@
     </div>
 
     <div class="btn-row" id="nextOnlyRow">
-      <button type="button" id="btnNext2" class="primary">Next</button>
+      <button type="button" id="btnNext2" class="primary" disabled>Next</button>
     </div>
   </div>
 
@@ -271,6 +274,8 @@
        * (server still inserts orders only on/after lookback).
        */
       var AMZ_OH_DO_ANCHOR_TRIM_DAYS = 45;
+      /** Must match AMZ_OFFSET_CATEGORY_SELECT_VALUE in amazonorders.gs (first #offsetCat option). */
+      var AMZ_OFFSET_CATEGORY_SELECT_VALUE = "__AMZ_OFFSET_SELECT__";
 
       function stripTimeLocal(d) {
         if (!d || isNaN(d.getTime())) return null;
@@ -435,6 +440,17 @@
       function showImportButton(show) {
         var row = $("importActionRow");
         if (row) row.style.display = show ? "flex" : "none";
+        if (show) updateOffsetCategoryUiGating();
+      }
+
+      /** Enable Next / Import only after user leaves “-- Select Value --” (Uncategorized or a sheet category). */
+      function updateOffsetCategoryUiGating() {
+        var sel = $("offsetCat");
+        var next2 = $("btnNext2");
+        var imp = $("btnImport");
+        var bad = !sel || sel.selectedIndex <= 0;
+        if (next2) next2.disabled = bad;
+        if (imp) imp.disabled = bad;
       }
       /**
        * Verify on: Next only; payment panel hidden until Next; unified Import hidden until analysis completes.
@@ -460,6 +476,7 @@
         } else {
           if (unified) unified.style.display = "none";
         }
+        updateOffsetCategoryUiGating();
       }
       function runAmazonImport() {
         var w = $("importWarnTime");
@@ -485,10 +502,11 @@
           return;
         }
 
-        var catVal = $("offsetCat") && $("offsetCat").value != null ? String($("offsetCat").value).trim() : "";
-        if (!catVal) {
+        var oc = $("offsetCat");
+        var catRaw = oc && oc.value != null ? String(oc.value) : AMZ_OFFSET_CATEGORY_SELECT_VALUE;
+        if (!oc || oc.selectedIndex <= 0 || catRaw === AMZ_OFFSET_CATEGORY_SELECT_VALUE) {
           log(
-            'Select a Category for offsets from the list. "-- Select Value --" is not valid (offsets must be categorized).'
+            'Choose a Category for offsets: “— Uncategorized —” or a category from your sheet—not “-- Select Value --”.'
           );
           $("panelStatus").scrollIntoView({ behavior: "smooth", block: "nearest" });
           $("btnStartOver").style.display = "inline-block";
@@ -834,6 +852,7 @@
             "<strong>AMZ Import</strong> was created with default settings and sample payment rows. " +
             "You can add or edit payment types on the <strong>AMZ Import</strong> tab; this wizard can also add rows from your <strong>Accounts</strong> tab after you choose your ZIP and continue.";
         }
+        updateOffsetCategoryUiGating();
       }).withFailureHandler(function () {}).getAmazonSidebarInit();
 
       $("btnPickZip").addEventListener("click", function () {
@@ -870,6 +889,7 @@
               list.appendChild(li);
             });
             $("btnNext1").disabled = false;
+            if ($("offsetCat")) $("offsetCat").selectedIndex = 0;
             $("panelFiles").classList.remove("panel-hidden");
             refreshPaymentVerifyImportUi();
             $("panelFiles").scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -886,6 +906,7 @@
       });
 
       $("cbVerifyPaymentMethods").addEventListener("change", refreshPaymentVerifyImportUi);
+      $("offsetCat").addEventListener("change", updateOffsetCategoryUiGating);
       refreshPaymentVerifyImportUi();
 
       $("btnNext2").addEventListener("click", function () {
@@ -903,6 +924,7 @@
         $("zipFile").value = "";
         $("zipFileName").textContent = "No file selected";
         $("btnNext1").disabled = true;
+        if ($("offsetCat")) $("offsetCat").selectedIndex = 0;
         if ($("cbVerifyPaymentMethods")) $("cbVerifyPaymentMethods").checked = true;
         refreshPaymentVerifyImportUi();
         $("payPanel").innerHTML = "";
