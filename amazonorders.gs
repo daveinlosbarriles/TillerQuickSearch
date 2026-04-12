@@ -1243,14 +1243,26 @@ function amzGetWeekStartDate(date) {
  * Active spreadsheet timezone, or script TZ if no spreadsheet (e.g. rare edge cases).
  * Date Added must match **{@link Spreadsheet#getSpreadsheetTimeZone}**, not only {@link Session#getScriptTimeZone},
  * or calendar day / serial will be wrong when those differ.
+ * Always returns a non-empty string: some sheets/projects return blank or invalid TZ; Utilities.formatDate requires a String.
  * @returns {string}
  */
 function amzActiveSpreadsheetTimeZoneOrDefault_() {
+  let tz = "";
   try {
-    return SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
+    tz = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
   } catch (e) {
-    return Session.getScriptTimeZone();
+    tz = "";
   }
+  tz = tz != null ? String(tz).trim() : "";
+  if (tz !== "") return tz;
+  try {
+    tz = Session.getScriptTimeZone();
+  } catch (e2) {
+    tz = "";
+  }
+  tz = tz != null ? String(tz).trim() : "";
+  if (tz !== "") return tz;
+  return "America/Los_Angeles";
 }
 
 /**
