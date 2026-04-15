@@ -38,7 +38,7 @@ This is as simple as it sounds.
 ---
 
 ## Install
-**Note: The tool is now available on Google Markeplace here:** https://workspace.google.com/marketplace/app/tiller_tools_by_dave/135351721412
+**Note: The tool is now available on Google Marketplace here:** https://workspace.google.com/marketplace/app/tiller_tools_by_dave/135351721412
 
 You can use the steps below if you want to install and maintain the code yourself.
 
