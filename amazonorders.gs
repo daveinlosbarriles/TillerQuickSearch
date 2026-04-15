@@ -1652,6 +1652,47 @@ function amzEnsureTransactionsMetadataColumn_(sheet, tillerLabels, timing) {
 }
 
 /**
+ * If Transactions has no column matching {@code tillerLabels.SOURCE}, inserts one: immediately before
+ * the Metadata column when that header exists (keeps Metadata rightmost), otherwise after the last column.
+ * Call after {@link amzEnsureTransactionsMetadataColumn_} so Metadata is present when both were missing.
+ * @param {GoogleAppsScript.Sheet} sheet
+ * @param {Object} tillerLabels - from readAmzImportConfig
+ * @param {Array<string>} [timing] - optional log lines
+ * @returns {Object} refreshed map from {@link amzGetTillerColumnMap}
+ */
+function amzEnsureTransactionsSourceColumn_(sheet, tillerLabels, timing) {
+  let tillerCols = amzGetTillerColumnMap(sheet);
+  const sourceLabel =
+    tillerLabels && tillerLabels.SOURCE != null ? String(tillerLabels.SOURCE).trim() : "";
+  if (!sourceLabel) return tillerCols;
+  if (amzGetTillerColumnIndex_(tillerCols, sourceLabel) != null) return tillerCols;
+  const metaLabel =
+    tillerLabels && tillerLabels.METADATA != null ? String(tillerLabels.METADATA).trim() : "";
+  const metaCol = metaLabel ? amzGetTillerColumnIndex_(tillerCols, metaLabel) : null;
+  let newCol;
+  if (metaCol != null) {
+    sheet.insertColumnBefore(metaCol);
+    newCol = metaCol;
+    sheet.getRange(1, newCol).setValue(sourceLabel);
+  } else {
+    const lastCol = Math.max(sheet.getLastColumn(), 1);
+    sheet.insertColumnAfter(lastCol);
+    newCol = lastCol + 1;
+    sheet.getRange(1, newCol).setValue(sourceLabel);
+  }
+  const lastRow = Math.max(sheet.getLastRow(), 1);
+  try {
+    amzEnsureSheetGridCovers(sheet, lastRow, newCol);
+  } catch (e) {
+    /* ignore */
+  }
+  if (timing && typeof timing.push === "function") {
+    timing.push('Server: added "' + sourceLabel + '" column at column ' + newCol + ".");
+  }
+  return amzGetTillerColumnMap(sheet);
+}
+
+/**
  * Ensures every written Tiller label maps to a Transactions header (case-insensitive).
  * @returns {string|null} Error message or null.
  */
@@ -2626,8 +2667,9 @@ function openAmazonOrdersSidebar() {
     const targetSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(config.tillerLabels.SHEET_NAME);
     if (targetSheet) {
       targetSheet.activate();
-      // Same as import paths: ensure Metadata column exists (not only when a CSV import runs).
+      // Same as import paths: ensure Metadata + Source columns exist (not only when a CSV import runs).
       amzEnsureTransactionsMetadataColumn_(targetSheet, config.tillerLabels, null);
+      amzEnsureTransactionsSourceColumn_(targetSheet, config.tillerLabels, null);
     }
   }
   const html = HtmlService.createHtmlOutputFromFile("AmazonOrdersSidebar").setTitle("Tiller™ Amazon Import");
@@ -2675,6 +2717,7 @@ function importAmazonRecent(csvText, months, options) {
 
   let tillerCols = amzGetTillerColumnMap(sheet);
   tillerCols = amzEnsureTransactionsMetadataColumn_(sheet, tillerLabels, timing);
+  tillerCols = amzEnsureTransactionsSourceColumn_(sheet, tillerLabels, timing);
   const colMapErr0 = amzValidateTransactionsImportColumns_(tillerCols, tillerLabels);
   if (colMapErr0) return colMapErr0;
   const categoryColNum = offsetCategory
@@ -3177,6 +3220,7 @@ function importDigitalReturnsCsv(csvText, options, digitalOrdersCsv) {
 
   let tillerCols = amzGetTillerColumnMap(sheet);
   tillerCols = amzEnsureTransactionsMetadataColumn_(sheet, tillerLabels, timing);
+  tillerCols = amzEnsureTransactionsSourceColumn_(sheet, tillerLabels, timing);
   const colMapErrDr = amzValidateTransactionsImportColumns_(tillerCols, tillerLabels);
   if (colMapErrDr) return colMapErrDr;
   const categoryColNum = offsetCategory
@@ -3468,6 +3512,7 @@ function importRefundDetailsCsv(csvText, options, orderHistoryCsv) {
 
   let tillerCols = amzGetTillerColumnMap(sheet);
   tillerCols = amzEnsureTransactionsMetadataColumn_(sheet, tillerLabels, timing);
+  tillerCols = amzEnsureTransactionsSourceColumn_(sheet, tillerLabels, timing);
   const colMapErrRd = amzValidateTransactionsImportColumns_(tillerCols, tillerLabels);
   if (colMapErrRd) return colMapErrRd;
   const categoryColNum = offsetCategory
