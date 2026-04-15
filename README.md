@@ -1,6 +1,6 @@
 # Tiller Tools
 
-One GitHub repo and Apps Script project for **Tiller** (https://tiller.com/) spreadsheets:
+ GitHub repo and Apps Script project for **Tiller** (https://tiller.com/) spreadsheets:
 
 - **Tiller Amazon Import** — sidebar wizard: upload Amazon’s **orders data ZIP**, and insert your Amazon orders, returns, digital orders, and digital returns in to Tiller.
 - **Tiller Quick Search** — sidebar to filter **Transactions** by date, amount, description, account, and category (basic filter + helper columns).  See your search criteria for all key fields at all times, use date ranges, boolean operators in the description, and easily modify. 
@@ -38,6 +38,9 @@ This is as simple as it sounds.
 ---
 
 ## Install
+**Note: The tool is now available on Google Markeplace here:** https://workspace.google.com/marketplace/app/tiller_tools_by_dave/135351721412
+
+You can use the steps below if you want to install and maintain the code yourself.
 
 ### Step 1: Open Apps Script and add files
 
